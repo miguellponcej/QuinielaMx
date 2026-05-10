@@ -1,0 +1,32 @@
+services:
+  quiniela-predictor:
+    build: .
+    container_name: quiniela-predictor
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:8501:8501"
+    expose:
+      - "8501"
+    volumes:
+      - ./data/examples:/app/data/examples:ro
+      - ./data/raw:/app/data/raw
+      - ./data/processed:/app/data/processed
+      - ./data/current:/app/data/current
+      - ./data/source_cache:/app/data/source_cache
+      - ./data/security_logs:/app/data/security_logs
+      - ./data/prediction_logs:/app/data/prediction_logs
+      - ./data/active_draws:/app/data/active_draws
+    restart: unless-stopped
+    networks:
+      - quiniela-internal
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  quiniela-internal:
+    driver: bridge

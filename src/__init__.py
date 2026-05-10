@@ -1,0 +1,2 @@
+"""QuinielaPredictor MX package."""
+

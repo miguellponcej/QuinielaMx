@@ -1,0 +1,114 @@
+---
+- name: Provision QuinielaPredictor MX private VM
+  hosts: quiniela
+  become: true
+  vars:
+    required_packages:
+      - ca-certificates
+      - curl
+      - git
+      - gnupg
+      - lsb-release
+      - ufw
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+      - unattended-upgrades
+  tasks:
+    - name: Update apt cache
+      ansible.builtin.apt:
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install base packages
+      ansible.builtin.apt:
+        name: "{{ required_packages }}"
+        state: present
+
+    - name: Add Docker GPG key
+      ansible.builtin.shell: |
+        install -m 0755 -d /etc/apt/keyrings
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+        chmod a+r /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+
+    - name: Add Docker repository
+      ansible.builtin.shell: |
+        echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo $VERSION_CODENAME) stable" > /etc/apt/sources.list.d/docker.list
+      args:
+        creates: /etc/apt/sources.list.d/docker.list
+
+    - name: Install Docker
+      ansible.builtin.apt:
+        update_cache: true
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+
+    - name: Ensure deploy user can run Docker
+      ansible.builtin.user:
+        name: "{{ ansible_user }}"
+        groups: docker
+        append: true
+
+    - name: Create app directory
+      ansible.builtin.file:
+        path: "{{ project_path }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: "0750"
+
+    - name: Install Nginx config
+      ansible.builtin.template:
+        src: ../nginx/quiniela_predictor.conf
+        dest: /etc/nginx/sites-available/quiniela_predictor.conf
+        owner: root
+        group: root
+        mode: "0644"
+
+    - name: Enable Nginx site
+      ansible.builtin.file:
+        src: /etc/nginx/sites-available/quiniela_predictor.conf
+        dest: /etc/nginx/sites-enabled/quiniela_predictor.conf
+        state: link
+        force: true
+
+    - name: Disable default Nginx site
+      ansible.builtin.file:
+        path: /etc/nginx/sites-enabled/default
+        state: absent
+
+    - name: Validate Nginx
+      ansible.builtin.command: nginx -t
+      changed_when: false
+
+    - name: Restart Nginx
+      ansible.builtin.service:
+        name: nginx
+        state: restarted
+        enabled: true
+
+    - name: Configure UFW
+      ansible.builtin.shell: |
+        ufw default deny incoming
+        ufw default allow outgoing
+        ufw allow OpenSSH
+        ufw allow 80/tcp
+        ufw allow 443/tcp
+        ufw --force enable
+      changed_when: false
+
+    - name: Enable services
+      ansible.builtin.service:
+        name: "{{ item }}"
+        state: started
+        enabled: true
+      loop:
+        - docker
+        - nginx

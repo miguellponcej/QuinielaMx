@@ -1,0 +1,16 @@
+id,local,visitante,liga,fecha,resultado,prob_l,prob_e,prob_v
+1,America,Guadalajara,Liga MX,2026-05-10,L,0.48,0.27,0.25
+2,Monterrey,Tigres,Liga MX,2026-05-10,E,0.39,0.29,0.32
+3,Pumas,Cruz Azul,Liga MX,2026-05-10,V,0.36,0.30,0.34
+4,Toluca,Pachuca,Liga MX,2026-05-10,L,0.44,0.28,0.28
+5,Leon,Santos,Liga MX,2026-05-10,L,0.41,0.30,0.29
+6,Atlas,Queretaro,Liga MX,2026-05-10,E,0.46,0.29,0.25
+7,Napoli,Inter,Serie A,2026-05-10,V,0.34,0.31,0.35
+8,Barcelona,Atletico Madrid,LaLiga,2026-05-10,L,0.50,0.25,0.25
+9,Arsenal,Chelsea,Premier League,2026-05-10,L,0.43,0.27,0.30
+10,Bayern Munich,Dortmund,Bundesliga,2026-05-10,L,0.52,0.24,0.24
+11,PSG,Monaco,Ligue 1,2026-05-10,L,0.57,0.23,0.20
+12,Porto,Benfica,Portugal,2026-05-10,E,0.38,0.30,0.32
+13,Ajax,PSV,Eredivisie,2026-05-10,V,0.35,0.29,0.36
+14,River Plate,Boca Juniors,Argentina,2026-05-10,V,0.33,0.32,0.35
+
