@@ -30,16 +30,26 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
         cols[1].metric("Calidad", f"{draw.get('data_quality_score', 0)}/100")
         cols[2].metric("Score", f"{rec.get('recommendation_score', 0)}/100")
         cols[3].metric("Prediccion directa", "Si" if can_predict else "No")
-        st.write(
-            {
-                "Fecha sorteo": draw.get("draw_date", "Dato no disponible"),
-                "Fecha limite": draw.get("closing_date", "Dato no disponible"),
-                "Premio/bolsa": draw.get("estimated_prize") or draw.get("accumulated_pool") or "Dato no disponible",
-                "Costo": draw.get("cost_per_entry", "Dato no disponible"),
-                "Fuente": draw.get("official_url", "Dato no disponible"),
-                "Requiere mas datos web": "Si" if needs_manual else "No",
-            }
-        )
+        d1, d2, d3 = st.columns(3)
+        d1.caption("Fecha sorteo")
+        d1.write(draw.get("draw_date", "Dato no disponible"))
+        d2.caption("Fecha limite")
+        d2.write(draw.get("closing_date", "Dato no disponible"))
+        d3.caption("Premio/bolsa")
+        d3.write(draw.get("estimated_prize") or draw.get("accumulated_pool") or "Dato no disponible")
+        d4, d5, d6 = st.columns(3)
+        d4.caption("Costo")
+        d4.write(draw.get("cost_per_entry", "Dato no disponible"))
+        d5.caption("Fuente principal")
+        d5.write(draw.get("official_url", "Dato no disponible"))
+        d6.caption("Requiere mas datos")
+        d6.write("Si" if needs_manual else "No")
+        if draw.get("matches"):
+            st.caption(f"Partidos estructurados detectados: {len(draw.get('matches', []))}")
+        if draw.get("source_warnings"):
+            with st.expander("Notas de fuente"):
+                for warning in draw.get("source_warnings", []):
+                    st.write(f"- {warning}")
         st.info(rec.get("reason", "Dato no disponible"))
         action = recommended_action(draw)
         if st.button(action, key=f"{key_prefix}_{draw.get('game_id')}"):

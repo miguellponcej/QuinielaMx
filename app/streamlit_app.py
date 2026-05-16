@@ -43,6 +43,16 @@ from src.web.app_layout import user_label
 
 
 st.set_page_config(page_title="QuinielaPredictor MX", layout="wide")
+st.markdown(
+    """
+    <style>
+    #MainMenu, footer, header {visibility: hidden;}
+    .stJson {display: none;}
+    div[data-testid="stToolbar"] {visibility: hidden;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 def get_request_context() -> tuple[str, str]:
@@ -96,11 +106,14 @@ def build_web_trace(draw: dict | None, payload: dict) -> object:
     web_locations = list(dict.fromkeys(payload.get("sources", [])))
     if draw and draw.get("official_url") not in (None, "", "Dato no disponible"):
         web_locations.append(draw["official_url"])
+    if draw:
+        web_locations.extend(draw.get("alternate_sources", []) or [])
     web_locations = list(dict.fromkeys(web_locations)) or ["active_draws_service"]
     incomplete = []
     if draw:
         incomplete.extend(draw.get("missing_fields", []))
         incomplete.extend(draw.get("source_errors", []))
+        incomplete.extend(draw.get("source_warnings", []))
     return build_manual_trace(
         internal_file_paths=["data/active_draws/cache/active_draws_cache.json"],
         web_locations=web_locations,
@@ -277,24 +290,29 @@ def render_web_data_unavailable(config, draw: dict | None, payload: dict, trace)
         "y APIs de momios disponibles para reintento; no se usaran cargas manuales ni datos inventados."
     )
     if draw:
-        st.write("Fuente consultada")
-        st.json(
-            {
-                "juego": draw.get("game_name"),
-                "url": draw.get("official_url"),
-                "actualizado": draw.get("last_updated"),
-                "frescura": draw.get("data_freshness"),
-                "calidad": draw.get("data_quality_score"),
-                "faltantes": draw.get("missing_fields", []),
-                "errores_fuente": draw.get("source_errors", []),
-            }
+        st.dataframe(
+            [
+                {
+                    "juego": draw.get("game_name"),
+                    "fuente": draw.get("official_url"),
+                    "actualizado": draw.get("last_updated"),
+                    "frescura": draw.get("data_freshness"),
+                    "calidad": draw.get("data_quality_score"),
+                    "faltantes": ", ".join(draw.get("missing_fields", [])) or "Ninguno",
+                    "notas": ", ".join(draw.get("source_warnings", [])) or "Sin notas",
+                }
+            ],
+            use_container_width=True,
+            hide_index=True,
         )
     if payload.get("errors"):
         with st.expander("Errores de fuentes web"):
-            st.write(payload["errors"])
-    render_source_diagnostics(payload.get("source_diagnostics", []))
+            for error in payload["errors"]:
+                st.write(f"- {error}")
+    with st.expander("Estado de fuentes web"):
+        render_source_diagnostics(payload.get("source_diagnostics", []), show_title=False)
     with st.expander("Trazabilidad registrada"):
-        st.json(trace.as_dict())
+        render_trace_summary(trace)
 
 
 def render_dashboard(config, quiniela_df: pd.DataFrame, trace) -> None:
@@ -308,7 +326,7 @@ def render_dashboard(config, quiniela_df: pd.DataFrame, trace) -> None:
     st.write("Quiniela cargada")
     st.dataframe(quiniela_df, use_container_width=True)
     with st.expander("Trazabilidad de datos registrada"):
-        st.json(trace.as_dict())
+        render_trace_summary(trace)
 
 
 def render_prediction(config, predictions, prediction_df: pd.DataFrame) -> None:
@@ -321,6 +339,7 @@ def render_prediction(config, predictions, prediction_df: pd.DataFrame) -> None:
         "visitante",
         "momios",
         "fuente_momio",
+        "linea_mercado",
         "lectura_favorito",
         "lectura_riesgo",
         "lectura_recomendacion",
@@ -333,7 +352,14 @@ def render_prediction(config, predictions, prediction_df: pd.DataFrame) -> None:
         for prediction in predictions:
             st.markdown(f"**Partido {prediction.id}: {prediction.local} vs {prediction.visitante}**")
             st.write(prediction.executive_explanation.mensaje)
-            st.json(prediction.executive_explanation.as_dict())
+            st.dataframe(
+                [
+                    {"bloque": "Lectura rapida", **prediction.executive_explanation.lectura_rapida},
+                    {"bloque": "Factores", **prediction.executive_explanation.factores},
+                ],
+                use_container_width=True,
+                hide_index=True,
+            )
     prob_cols = [f"prob_{option.lower()}" for option in config.options]
     chart_df = prediction_df[["id", *prob_cols]].melt("id", var_name="resultado", value_name="probabilidad")
     fig = px.bar(chart_df, x="id", y="probabilidad", color="resultado", barmode="group")
@@ -411,7 +437,7 @@ def render_historics(config) -> None:
 def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> None:
     """Render active draws smart Home."""
 
-    st.subheader("Home")
+    st.subheader("Centro de decision")
     col_a, col_b = st.columns([3, 1])
     force_refresh = col_b.button("Actualizar sorteos vigentes")
     payload = load_active_draws_home_dashboard(auth, force_refresh=force_refresh)
@@ -422,8 +448,8 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         st.warning("No fue posible actualizar fuentes web o se uso cache vigente. Se muestran datos de cache/locales.")
     if model["errors"]:
         with st.expander("Errores de fuentes"):
-            st.write(model["errors"])
-    render_source_diagnostics(model.get("source_diagnostics", []))
+            for error in model["errors"]:
+                st.write(f"- {error}")
     summary = model["summary"]
     c1, c2, c3, c4, c5, c6 = st.columns(6)
     c1.metric("Juegos", summary.get("total_games", 0))
@@ -449,6 +475,7 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
 
     if model["ready_for_prediction"]:
         st.subheader("Listos para generar prediccion")
+        st.success("Estos juegos ya tienen partidos estructurados desde fuentes web/cache. Puedes generar prediccion desde sus tarjetas.")
         ready_rows = [
             {
                 "juego": draw.get("game_name"),
@@ -489,6 +516,7 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
                 selected_action["game_id"],
                 selected_draw.get("matches", []),
                 budget=budget,
+                trace=build_web_trace(selected_draw, payload),
             )
             _render_home_prediction_result(result)
         else:
@@ -497,12 +525,15 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
                 "Revisa la seccion de datos faltantes para completarlo."
             )
     render_missing_data(model["draws"])
+    with st.expander("Estado de fuentes web consultadas"):
+        render_source_diagnostics(model.get("source_diagnostics", []), show_title=False)
 
 
-def render_source_diagnostics(diagnostics: list[dict]) -> None:
+def render_source_diagnostics(diagnostics: list[dict], show_title: bool = True) -> None:
     """Render trusted source status for the Home dashboard."""
 
-    st.subheader("Estado de fuentes web")
+    if show_title:
+        st.subheader("Estado de fuentes web")
     if not diagnostics:
         st.info("No hay diagnostico de fuentes disponible en esta ejecucion.")
         return
@@ -544,6 +575,7 @@ def _render_home_prediction_result(result: dict) -> None:
             "riesgo": prediction.risk,
             "momios": prediction.as_dict().get("momios"),
             "fuente_momio": prediction.market_source or "Dato no disponible",
+            "linea_mercado": prediction.as_dict().get("linea_mercado"),
             "explicacion": prediction.explanation,
         }
         for prediction in predictions
@@ -557,22 +589,44 @@ def _render_home_prediction_result(result: dict) -> None:
     st.dataframe(ticket.table, use_container_width=True, hide_index=True)
 
 
+def render_trace_summary(trace) -> None:
+    """Render traceability without raw JSON blocks."""
+
+    data = trace.as_dict()
+    internal_files = [source.get("name", "") for source in data.get("internal_files", [])]
+    web_sources = [source.get("location", source.get("name", "")) for source in data.get("web_sources", [])]
+    rows = [
+        {"categoria": "Archivos internos", "detalle": ", ".join(internal_files) or "Ninguno"},
+        {"categoria": "Fuentes web", "detalle": ", ".join(web_sources) or "Ninguna"},
+        {"categoria": "Datos frescos", "detalle": ", ".join(data.get("fresh_data", [])) or "No confirmado"},
+        {"categoria": "Datos incompletos", "detalle": ", ".join(data.get("incomplete_data", [])) or "Ninguno"},
+        {"categoria": "Datos descartados", "detalle": ", ".join(data.get("discarded_data", [])) or "Ninguno"},
+        {"categoria": "Variables del modelo", "detalle": ", ".join(data.get("model_variables", [])) or "No disponible"},
+        {"categoria": "Version del modelo", "detalle": data.get("model_version", "Dato no disponible")},
+        {"categoria": "Fecha", "detalle": data.get("generated_at", "Dato no disponible")},
+    ]
+    st.dataframe(rows, use_container_width=True, hide_index=True)
+
+
 def render_configuration(user: AuthUser, config: AuthConfig, trace) -> None:
     """Render private configuration/admin page."""
 
     st.subheader("Configuracion")
-    st.write("Usuario autenticado")
-    st.json(
-        {
-            "usuario": user.name,
-            "correo": user.email,
-            "ultimo_acceso": user.last_access_at,
-            "correos_autorizados": list(config.authorized_emails),
-            "estado_conexion_web": "Requiere verificacion por corrida; fuentes registradas en trazabilidad.",
-            "ultima_prediccion": trace.generated_at,
-            "version_modelo": MODEL_VERSION,
-            "estado_seguridad": "Autenticacion activa, lista blanca de correos, logs de seguridad y sesiones con expiracion.",
-        }
+    st.dataframe(
+        [
+            {"campo": "Usuario", "valor": user.name},
+            {"campo": "Correo", "valor": user.email},
+            {"campo": "Ultimo acceso", "valor": user.last_access_at},
+            {"campo": "Correos autorizados", "valor": ", ".join(config.authorized_emails)},
+            {"campo": "Ultima prediccion", "valor": trace.generated_at},
+            {"campo": "Version del modelo", "valor": MODEL_VERSION},
+            {
+                "campo": "Estado de seguridad",
+                "valor": "Autenticacion activa, lista blanca de correos, logs y sesiones con expiracion.",
+            },
+        ],
+        use_container_width=True,
+        hide_index=True,
     )
     st.info("Los usuarios autorizados se controlan desde AUTHORIZED_EMAILS. No se agregan usuarios desde la interfaz.")
 

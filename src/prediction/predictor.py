@@ -41,6 +41,7 @@ class MatchPrediction:
     trace: PredictionTrace
     market_odds: dict[str, float]
     market_source: str
+    market_note: str = ""
 
     def as_dict(self) -> dict[str, Any]:
         """Return serializable dict."""
@@ -64,7 +65,8 @@ class MatchPrediction:
             "mensaje_ejecutivo": self.executive_explanation.mensaje,
             "momios": _format_odds(self.market_odds),
             "fuente_momio": self.market_source or "Dato no disponible",
-            "mercado_disponible": "Si" if self.market_odds or self.market_source else "No",
+            "linea_mercado": self.market_note or "Dato no disponible",
+            "mercado_disponible": "Si" if self.market_odds or self.market_source or self.market_note else "No",
             "trazabilidad": self.trace.as_dict(),
             **self.trace.compact_summary(),
         }
@@ -126,6 +128,7 @@ class QuinielaPredictor:
             market_info = market_lookup.get(match_id, {})
             market_odds = dict(market_info.get("odds", {}))
             market_source = str(market_info.get("source", ""))
+            market_note = str(market_info.get("note", ""))
             recommendation = max(probs, key=probs.get)
             coverage = self._suggest_initial_coverage(probs)
             coverage_type = {1: "Fijo", 2: "Doble", 3: "Triple"}[len(coverage)]
@@ -158,6 +161,7 @@ class QuinielaPredictor:
                     trace=trace,
                     market_odds=market_odds,
                     market_source=market_source,
+                    market_note=market_note,
                 )
             )
         return predictions
@@ -179,11 +183,13 @@ class QuinielaPredictor:
             odds = _extract_decimal_odds(row_data, self.game_config.options)
             probabilities = _extract_market_probabilities(row_data, self.game_config.options, odds)
             source = _extract_market_source(row_data)
-            if probabilities:
+            note = _extract_market_note(row_data)
+            if probabilities or odds or source or note:
                 lookup[match_id] = {
                     "probabilities": probabilities,
                     "odds": odds,
                     "source": source,
+                    "note": note,
                 }
         return lookup
 
@@ -228,10 +234,13 @@ def _extract_decimal_odds(row: dict[str, Any], options: tuple[str, ...]) -> dict
         suffix = option.lower()
         value = _first_present(row, [f"momio_{suffix}", f"odds_{suffix}", f"decimal_{suffix}"])
         american = _first_present(row, [f"american_{suffix}", f"momio_americano_{suffix}"])
-        if value is not None:
-            odds[option] = float(value)
-        elif american is not None:
-            odds[option] = american_to_decimal(float(american))
+        try:
+            if value is not None:
+                odds[option] = float(value)
+            elif american is not None:
+                odds[option] = american_to_decimal(float(american))
+        except (TypeError, ValueError):
+            continue
     return odds
 
 
@@ -260,6 +269,11 @@ def _extract_market_source(row: dict[str, Any]) -> str:
         row,
         ["fuente_momio", "fuente", "odds_source", "source", "bookmaker", "casa", "casa_apuestas"],
     )
+    return "" if value is None else str(value)
+
+
+def _extract_market_note(row: dict[str, Any]) -> str:
+    value = _first_present(row, ["linea_mercado", "market_line", "momio_texto", "odds_details"])
     return "" if value is None else str(value)
 
 

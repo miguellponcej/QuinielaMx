@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from src.active_draws.draw_parser import base_draw, parse_home_results, parse_quiniela_page, parse_tulotero_home
+from src.data_sources.espn_client import fetch_football_fixtures, fetch_soccer_fixtures
 from src.data_sources.source_registry import TRUSTED_WEB_SOURCES, WebSource
 
 
@@ -133,7 +134,23 @@ class OfficialSourcesClient:
             draw = base_draw(game_id, game_name, "sports_pool", url, "oficial_quiniela")
             draw["source_errors"].append(error)
             return FetchResult(ok=False, draws=[draw], errors=[error], sources=[url])
-        return FetchResult(ok=True, draws=[parse_quiniela_page(html, game_id, game_name, url)], errors=[], sources=[url])
+        draw = parse_quiniela_page(html, game_id, game_name, url)
+        fixture_errors: list[str] = []
+        fixture_sources: list[str] = []
+        if not draw.get("matches"):
+            matches, fixture_errors, fixture_sources = self._fetch_structured_fixture_fallback(game_id)
+            if matches:
+                _attach_fixture_fallback(draw, matches, fixture_sources)
+        sources = [url, *fixture_sources]
+        errors = fixture_errors if not draw.get("matches") else []
+        return FetchResult(ok=bool(draw.get("matches")) or not errors, draws=[draw], errors=errors, sources=sources)
+
+    def _fetch_structured_fixture_fallback(self, game_id: str) -> tuple[list[dict], list[str], list[str]]:
+        if game_id == "protouch":
+            return fetch_football_fixtures(limit=13, timeout_seconds=self.timeout_seconds)
+        if game_id in {"progol", "progol_revancha", "progol_media_semana"}:
+            return fetch_soccer_fixtures(limit=14, timeout_seconds=self.timeout_seconds)
+        return [], [], []
 
     def _fetch_url(self, url: str) -> tuple[str, str | None]:
         request = urllib.request.Request(
@@ -214,3 +231,25 @@ def _merge_draw(existing: dict, incoming: dict) -> None:
 
 def _is_missing(value: object) -> bool:
     return value in (None, "", "Dato no disponible")
+
+
+def _attach_fixture_fallback(draw: dict, matches: list[dict], sources: list[str]) -> None:
+    """Attach structured fixtures while preserving source transparency."""
+
+    draw["matches"] = matches
+    draw["status"] = "active"
+    draw["data_freshness"] = "actualizada"
+    draw["raw_source"] = f"{draw.get('raw_source', '')}+espn_scoreboard"
+    draw["has_recent_sports_data"] = True
+    draw["has_market_data"] = any(match.get("linea_mercado") not in (None, "", "Dato no disponible") for match in matches)
+    if _is_missing(draw.get("draw_date")) and matches:
+        draw["draw_date"] = matches[0].get("fecha", "Dato no disponible")
+    draw.setdefault("alternate_sources", [])
+    draw["alternate_sources"] = list(dict.fromkeys([*draw["alternate_sources"], *sources]))
+    previous_errors = draw.get("source_errors") or []
+    warning = (
+        "La fuente oficial no entrego partidos como texto. Se uso ESPN Scoreboard como "
+        "fuente deportiva estructurada complementaria; validar contra el volante oficial antes de jugar."
+    )
+    draw["source_warnings"] = list(dict.fromkeys([*previous_errors, warning]))
+    draw["source_errors"] = []

@@ -39,6 +39,9 @@ def get_active_draws(
     if not force_refresh and is_cache_fresh(refresh_minutes):
         payload = load_active_draws_cache()
         used_cache = True
+        if payload and _cache_needs_structured_fixture_refresh(payload):
+            payload = None
+            used_cache = False
     if payload is None:
         result = client.fetch_official_active_draws()
         errors.extend(result.errors)
@@ -81,6 +84,15 @@ def _prepare_draw(draw: dict, used_cache: bool) -> dict:
     prepared = apply_validation(prepared)
     prepared["recommendation"] = generate_home_recommendation(prepared)
     return prepared
+
+
+def _cache_needs_structured_fixture_refresh(payload: dict) -> bool:
+    """Refresh old cache entries that predate structured fixture fallback."""
+
+    sports_draws = [draw for draw in payload.get("draws", []) if draw.get("game_type") == "sports_pool"]
+    if not sports_draws:
+        return False
+    return all(not draw.get("matches") for draw in sports_draws)
 
 
 def summarize_active_draws(draws: list[dict]) -> dict:

@@ -92,13 +92,42 @@ def _market_frame_from_quiniela(frame: pd.DataFrame, config: GameConfig) -> pd.D
     has_probabilities = all(f"prob_{suffix}" in columns for suffix in option_suffixes)
     has_decimal_odds = all((f"momio_{suffix}" in columns or f"odds_{suffix}" in columns) for suffix in option_suffixes)
     has_american_odds = all(f"american_{suffix}" in columns or f"momio_americano_{suffix}" in columns for suffix in option_suffixes)
-    if not (has_probabilities or has_decimal_odds or has_american_odds):
+    has_market_notes = bool(
+        columns
+        & {
+            "fuente_momio",
+            "fuente",
+            "odds_source",
+            "source",
+            "bookmaker",
+            "casa",
+            "casa_apuestas",
+            "linea_mercado",
+            "market_line",
+            "momio_texto",
+            "odds_details",
+        }
+    )
+    if not (has_probabilities or has_decimal_odds or has_american_odds or has_market_notes):
         return None
     keep = [
         column
         for column in frame.columns
         if str(column).lower() == "id"
         or str(column).lower().startswith(("prob_", "momio_", "odds_", "decimal_", "american_"))
-        or str(column).lower() in {"fuente_momio", "fuente", "odds_source", "source", "bookmaker", "casa", "casa_apuestas"}
+        or str(column).lower()
+        in {
+            "fuente_momio",
+            "fuente",
+            "odds_source",
+            "source",
+            "bookmaker",
+            "casa",
+            "casa_apuestas",
+            "linea_mercado",
+            "market_line",
+            "momio_texto",
+            "odds_details",
+        }
     ]
     return frame[keep].copy()
