@@ -437,39 +437,51 @@ def render_historics(config) -> None:
 def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> None:
     """Render active draws smart Home."""
 
-    st.subheader("Centro de decision")
+    st.subheader("Home")
     col_a, col_b = st.columns([3, 1])
     force_refresh = col_b.button("Actualizar sorteos vigentes")
     payload = load_active_draws_home_dashboard(auth, force_refresh=force_refresh)
     model = build_home_view_model(payload, user)
     col_a.markdown(f"### {model['welcome']}")
     st.caption(f"Ultima actualizacion: {model['updated_at']} | Estado: {model['connection_status']}")
-    if model["used_cache"]:
+    if model["used_cache"] and not model["ready_for_prediction"]:
         st.warning("No fue posible actualizar fuentes web o se uso cache vigente. Se muestran datos de cache/locales.")
+    elif model["used_cache"]:
+        st.info("Se esta usando cache vigente con partidos estructurados. Puedes generar prediccion y actualizar fuentes cuando quieras.")
     if model["errors"]:
         with st.expander("Errores de fuentes"):
             for error in model["errors"]:
                 st.write(f"- {error}")
     summary = model["summary"]
-    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Juegos", summary.get("total_games", 0))
-    c2.metric("Quinielas", summary.get("sports_pools", 0))
-    c3.metric("Sorteos", summary.get("random_lotteries", 0))
-    c4.metric("Recomendados", summary.get("recommended_games", 0))
-    c5.metric("Incompletos", summary.get("incomplete_games", 0))
-    c6.metric("Proximo cierre", summary.get("next_closing", "Dato no disponible"))
+    c2.metric("Listos para predecir", len(model["ready_for_prediction"]))
+    c3.metric("Quinielas", summary.get("sports_pools", 0))
+    c4.metric("Sorteos", summary.get("random_lotteries", 0))
+    c5.metric("Recomendados", summary.get("recommended_games", 0))
 
     st.subheader("Centro de decision")
     decision = model["decision_center"]
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Listos para predecir", decision.get("ready_count", 0))
-    d2.metric("Requieren mas datos web", decision.get("manual_count", 0))
+    d2.metric("Bloqueados por datos", decision.get("manual_count", 0))
     d3.metric("Mejor calidad", decision.get("best_quality_game", "Dato no disponible"))
     d4.metric("Cierra primero", decision.get("next_closing_game", "Dato no disponible"))
     st.caption(f"Fecha de cierre mas proxima: {decision.get('next_closing_date', 'Dato no disponible')}")
 
     if model["decision_rows"]:
-        st.dataframe(model["decision_rows"], use_container_width=True, hide_index=True)
+        cols = [
+            "prioridad",
+            "juego",
+            "tipo",
+            "estado",
+            "calidad_datos",
+            "recomendacion",
+            "score",
+            "accion_sugerida",
+            "prediccion_directa",
+        ]
+        st.dataframe(model["decision_rows"], use_container_width=True, hide_index=True, column_order=cols)
     else:
         st.info("No se encontraron sorteos o quinielas vigentes en fuentes oficiales, cache o archivos locales.")
 
@@ -489,18 +501,18 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         st.dataframe(ready_rows, use_container_width=True, hide_index=True)
 
     if model["manual_required"]:
-        st.subheader("Requieren mas datos web")
+        st.subheader("Bloqueados por datos")
         manual_rows = [
             {
                 "juego": draw.get("game_name"),
                 "faltantes": ", ".join(draw.get("missing_fields", [])) or "partidos estructurados",
-                "accion": "Actualizar fuentes web/cache",
+                "accion": "Actualizar fuentes web",
             }
             for draw in model["manual_required"]
         ]
         st.dataframe(manual_rows, use_container_width=True, hide_index=True)
 
-    st.subheader("Analizar primero")
+    st.subheader("Juegos priorizados")
     selected_action = None
     selected_draw = None
     for draw in model["recommended"]:
