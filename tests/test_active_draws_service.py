@@ -114,6 +114,40 @@ def test_official_future_matches_override_past_result_date():
     assert len(payload["draws"][0]["matches"]) == 14
 
 
+def test_official_quiniela_reference_survives_closed_results_record():
+    result_draw = base_draw(
+        "progol_media_semana",
+        "Progol Media Semana",
+        "sports_pool",
+        "https://official/results",
+        "oficial_home_resultados",
+        status="closed",
+    )
+    result_draw["draw_number"] = "2330"
+    result_draw["draw_date"] = "11/05/2026"
+    official_draw = base_draw(
+        "progol_media_semana",
+        "Progol Media Semana",
+        "sports_pool",
+        "https://official/quiniela",
+        "oficial_quiniela",
+        status="Dato no disponible",
+    )
+    official_draw["alternate_sources"] = ["https://official/guia.pdf?v=1"]
+    official_draw["source_artifacts"] = [
+        {"type": "pdf", "url": "https://official/guia.pdf?v=1", "purpose": "guia_quiniela_oficial"}
+    ]
+    result = FetchResult(ok=True, draws=[result_draw, official_draw], errors=[], sources=["https://official"])
+
+    payload = get_active_draws(force_refresh=True, client=FakeClient(result), user_email="test@example.com")
+
+    assert payload["summary"]["sports_pools"] == 1
+    assert payload["draws"][0]["status"] != "closed"
+    assert payload["draws"][0]["draw_number"] == "Dato no disponible"
+    assert payload["draws"][0]["source_artifacts"][0]["type"] == "pdf"
+    assert payload["draws"][0]["alternate_sources"] == ["https://official/guia.pdf?v=1"]
+
+
 def test_generic_espn_fixtures_are_not_actionable_for_official_pool():
     draw = base_draw(
         "progol_media_semana",

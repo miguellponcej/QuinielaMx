@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from src.home.home_recommendations import can_generate_prediction, recommended_action, requires_manual_load
 
@@ -51,7 +52,8 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
             st.warning(
                 "Se descartaron partidos de calendario general porque no coinciden con la quiniela oficial vigente."
             )
-        render_official_reference(draw, expanded=False)
+        has_reference = bool(draw.get("source_artifacts") or draw.get("alternate_sources"))
+        render_official_reference(draw, expanded=bool(has_reference and not can_predict))
         if draw.get("source_warnings"):
             with st.expander("Notas de fuente"):
                 for warning in draw.get("source_warnings", []):
@@ -110,21 +112,51 @@ def _display_status(value: object) -> str:
 def render_official_reference(draw: dict, expanded: bool = True) -> None:
     """Render official contest image or guide reference."""
 
-    artifacts = [item for item in draw.get("source_artifacts", []) if item.get("url")]
-    guide_sources = [
-        source
-        for source in draw.get("alternate_sources", [])
-        if isinstance(source, str) and (source.lower().endswith(".pdf") or ".pdf?" in source.lower())
+    artifacts = [item for item in draw.get("source_artifacts", []) if isinstance(item, dict) and item.get("url")]
+    image_artifacts = [
+        item
+        for item in artifacts
+        if str(item.get("type", "")).lower() == "image"
+        or str(item.get("url", "")).lower().split("?")[0].endswith((".png", ".jpg", ".jpeg", ".webp"))
     ]
-    if not artifacts and not guide_sources:
+    pdf_artifacts = [
+        item
+        for item in artifacts
+        if str(item.get("type", "")).lower() == "pdf" or ".pdf" in str(item.get("url", "")).lower()
+    ]
+    guide_sources = list(
+        dict.fromkeys(
+            [
+                item["url"]
+                for item in pdf_artifacts
+                if item.get("url")
+            ]
+            + [
+                source
+                for source in draw.get("alternate_sources", [])
+                if isinstance(source, str) and (source.lower().endswith(".pdf") or ".pdf?" in source.lower())
+            ]
+        )
+    )
+    official_url = draw.get("official_url")
+    if not image_artifacts and not guide_sources and not official_url:
         return
     with st.expander("Referencia oficial del concurso", expanded=expanded):
-        st.caption("Imagen o guia tomada de la pagina oficial consultada para este juego.")
-        if artifacts:
-            first = artifacts[0]
-            st.image(first["url"], caption="Imagen oficial publicada por Pronosticos/Loteria Nacional", use_container_width=True)
-            if len(artifacts) > 1:
-                st.caption(f"Hay {len(artifacts)} imagenes oficiales registradas.")
+        st.caption("Referencia tomada de la pagina oficial consultada para este juego.")
+        if image_artifacts:
+            first_image = image_artifacts[0]
+            st.image(
+                first_image["url"],
+                caption="Imagen oficial publicada por Pronosticos/Loteria Nacional",
+                use_container_width=True,
+            )
+            if len(image_artifacts) > 1:
+                st.caption(f"Hay {len(image_artifacts)} imagenes oficiales registradas.")
         if guide_sources:
+            st.markdown("**Guia oficial vigente**")
+            st.caption("Si la vista previa no carga en este navegador, abre la guia oficial con el boton.")
+            components.iframe(guide_sources[0], height=560, scrolling=True)
             for idx, url in enumerate(guide_sources, start=1):
                 st.link_button(f"Abrir guia oficial {idx}", url)
+        if official_url:
+            st.link_button("Abrir pagina oficial consultada", str(official_url))

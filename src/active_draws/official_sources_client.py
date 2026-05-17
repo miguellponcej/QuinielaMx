@@ -137,6 +137,7 @@ class OfficialSourcesClient:
         draw = parse_quiniela_page(html, game_id, game_name, url)
         if not draw.get("matches"):
             guide_sources = extract_guide_pdf_urls(html, url, game_id)
+            _attach_official_reference(draw, guide_sources)
             guide_errors: list[str] = []
             for guide_url in guide_sources:
                 guide_draw, guide_error = fetch_guide_pdf_draw(
@@ -222,7 +223,15 @@ def _merge_draw(existing: dict, incoming: dict) -> None:
     incoming_url = incoming.get("official_url")
     if incoming_url and incoming_url != existing.get("official_url"):
         existing["alternate_sources"].append(incoming_url)
+    existing["alternate_sources"] = list(
+        dict.fromkeys([*(existing.get("alternate_sources") or []), *(incoming.get("alternate_sources") or [])])
+    )
     incoming_has_matches = bool(incoming.get("matches"))
+    incoming_is_official_page = incoming.get("raw_source") == "oficial_quiniela"
+    if incoming_is_official_page and not incoming_has_matches and existing.get("raw_source") == "oficial_home_resultados":
+        existing["status"] = "Dato no disponible"
+        existing["draw_number"] = "Dato no disponible"
+        existing["draw_date"] = "Dato no disponible"
     for field in [
         "draw_number",
         "closing_date",
@@ -255,3 +264,16 @@ def _merge_draw(existing: dict, incoming: dict) -> None:
 
 def _is_missing(value: object) -> bool:
     return value in (None, "", "Dato no disponible")
+
+
+def _attach_official_reference(draw: dict, guide_sources: list[str]) -> None:
+    """Keep official visual references visible even when parsing fails."""
+
+    draw.setdefault("alternate_sources", [])
+    draw["alternate_sources"] = list(dict.fromkeys([*draw["alternate_sources"], *guide_sources]))
+    existing_urls = {artifact.get("url") for artifact in draw.get("source_artifacts", [])}
+    for guide_url in guide_sources:
+        if guide_url not in existing_urls:
+            draw.setdefault("source_artifacts", []).append(
+                {"type": "pdf", "url": guide_url, "purpose": "guia_quiniela_oficial"}
+            )
