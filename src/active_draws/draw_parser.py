@@ -82,7 +82,7 @@ def parse_home_results(html: str, official_url: str) -> list[dict]:
             else:
                 draw["draw_number"] = groups[1]
                 draw["draw_date"] = groups[2]
-            draw["status"] = "Dato no disponible"
+            draw["status"] = "closed" if game_type == "sports_pool" else "Dato no disponible"
             draw["data_freshness"] = "actualizada"
         else:
             draw["source_errors"].append("No se encontro informacion estructurada en la fuente oficial.")

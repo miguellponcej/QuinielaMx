@@ -18,8 +18,10 @@ def build_decision_rows(draws: list[dict]) -> list[dict]:
             {
                 "prioridad": position,
                 "juego": draw.get("game_name", "Dato no disponible"),
+                "numero_juego": draw.get("draw_number", "Dato no disponible"),
+                "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
                 "tipo": _display_game_type(draw.get("game_type")),
-                "estado": draw.get("status", "Dato no disponible"),
+                "estado": display_status(draw.get("status")),
                 "cierre": draw.get("closing_date", "Dato no disponible"),
                 "calidad_datos": draw.get("data_quality_score", 0),
                 "recomendacion": rec.get("recommendation", "Dato no disponible"),
@@ -70,9 +72,15 @@ def can_generate_prediction(draw: dict) -> bool:
 def requires_manual_load(draw: dict) -> bool:
     """Return whether the draw needs more web data to become actionable."""
 
-    if draw.get("missing_fields") or draw.get("source_errors"):
+    if draw.get("source_errors"):
         return True
     if draw.get("game_type") == "sports_pool" and not draw.get("matches"):
+        return True
+    if draw.get("game_type") == "random_lottery" and not (
+        draw.get("draw_date") not in (None, "", "Dato no disponible")
+        or draw.get("estimated_prize") not in (None, "", "Dato no disponible")
+        or draw.get("accumulated_pool") not in (None, "", "Dato no disponible")
+    ):
         return True
     return False
 
@@ -87,6 +95,17 @@ def recommended_action(draw: dict) -> str:
     if draw.get("game_type") == "random_lottery":
         return "Ver analisis informativo"
     return draw.get("recommendation", {}).get("recommended_action", "Revisar despues")
+
+
+def display_status(value: object) -> str:
+    """Human readable status for UI."""
+
+    return {
+        "active": "Vigente",
+        "closed": "Cerrado",
+        "Vigente": "Vigente",
+        "Dato no disponible": "Dato no disponible",
+    }.get(str(value), str(value or "Dato no disponible"))
 
 
 def ready_for_prediction(draws: list[dict]) -> list[dict]:

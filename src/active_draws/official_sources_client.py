@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from src.active_draws.draw_parser import base_draw, parse_home_results, parse_quiniela_page, parse_tulotero_home
+from src.active_draws.official_guide_pdf import extract_guide_pdf_urls, fetch_guide_pdf_draw
 from src.data_sources.source_registry import TRUSTED_WEB_SOURCES, WebSource
 
 
@@ -135,18 +136,37 @@ class OfficialSourcesClient:
             return FetchResult(ok=False, draws=[draw], errors=[error], sources=[url])
         draw = parse_quiniela_page(html, game_id, game_name, url)
         if not draw.get("matches"):
-            draw["source_warnings"] = list(
-                dict.fromkeys(
-                    [
-                        *(draw.get("source_warnings") or []),
-                        (
-                            "No se habilito prediccion automatica porque la quiniela oficial no esta disponible "
-                            "como partidos estructurados. No se sustituye por calendarios genericos de ligas."
-                        ),
-                    ]
+            guide_sources = extract_guide_pdf_urls(html, url, game_id)
+            guide_errors: list[str] = []
+            for guide_url in guide_sources:
+                guide_draw, guide_error = fetch_guide_pdf_draw(
+                    guide_url,
+                    game_id,
+                    game_name,
+                    timeout_seconds=self.timeout_seconds,
                 )
-            )
-        return FetchResult(ok=bool(draw.get("matches")), draws=[draw], errors=[], sources=[url])
+                if guide_error:
+                    guide_errors.append(guide_error)
+                if guide_draw and guide_draw.get("matches"):
+                    _merge_draw(draw, guide_draw)
+                    break
+            if not draw.get("matches"):
+                draw["source_warnings"] = list(
+                    dict.fromkeys(
+                        [
+                            *(draw.get("source_warnings") or []),
+                            (
+                                "No se habilito prediccion automatica porque la quiniela oficial no esta disponible "
+                                "como partidos estructurados. No se sustituye por calendarios genericos de ligas."
+                            ),
+                        ]
+                    )
+                )
+                draw["source_errors"] = list(dict.fromkeys([*(draw.get("source_errors") or []), *guide_errors]))
+            sources = [url, *guide_sources]
+        else:
+            sources = [url]
+        return FetchResult(ok=bool(draw.get("matches")), draws=[draw], errors=[], sources=sources)
 
     def _fetch_url(self, url: str) -> tuple[str, str | None]:
         request = urllib.request.Request(
@@ -235,4 +255,3 @@ def _merge_draw(existing: dict, incoming: dict) -> None:
 
 def _is_missing(value: object) -> bool:
     return value in (None, "", "Dato no disponible")
-

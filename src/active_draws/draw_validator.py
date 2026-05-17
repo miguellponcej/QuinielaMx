@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, time, timezone
 
 from src.active_draws.draw_parser import NOT_AVAILABLE
 
@@ -34,6 +34,8 @@ def validate_active_draw(draw: dict) -> dict:
                 warnings.append("Hay partidos sin local o visitante.")
     if _is_expired(draw.get("closing_date")):
         warnings.append("La fecha limite parece vencida.")
+    if draw.get("game_type") == "sports_pool" and not _has_future_or_today_match(draw) and _is_expired(draw.get("draw_date")):
+        warnings.append("La fecha de celebracion ya paso.")
     score = _score(draw, missing_fields, warnings)
     return {
         "is_valid": bool(draw.get("game_name")) and bool(draw.get("official_url")),
@@ -49,6 +51,8 @@ def apply_validation(draw: dict) -> dict:
     validation = validate_active_draw(draw)
     draw = {**draw}
     if _is_expired(draw.get("closing_date")):
+        draw["status"] = "closed"
+    if draw.get("game_type") == "sports_pool" and not _has_future_or_today_match(draw) and _is_expired(draw.get("draw_date")):
         draw["status"] = "closed"
     draw["validation"] = validation
     draw["missing_fields"] = validation["missing_fields"]
@@ -71,11 +75,43 @@ def _is_number_like(value: object) -> bool:
 def _is_expired(value: object) -> bool:
     if _missing(value):
         return False
-    try:
-        parsed = datetime.fromisoformat(str(value))
-    except ValueError:
+    parsed = _parse_datetime(value)
+    if parsed is None:
         return False
-    return parsed < datetime.now(parsed.tzinfo)
+    return parsed < datetime.now(parsed.tzinfo or timezone.utc)
+
+
+def _has_future_or_today_match(draw: dict) -> bool:
+    today = datetime.now(timezone.utc).date()
+    for match in draw.get("matches") or []:
+        parsed = _parse_datetime(match.get("fecha"))
+        if parsed and parsed.date() >= today:
+            return True
+    return False
+
+
+def _parse_datetime(value: object) -> datetime | None:
+    if _missing(value):
+        return None
+    text = str(value).strip()
+    candidates = [text]
+    if text.endswith("Z"):
+        candidates.append(text.replace("Z", "+00:00"))
+    for candidate in candidates:
+        try:
+            parsed = datetime.fromisoformat(candidate)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        except ValueError:
+            pass
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+        try:
+            date_value = datetime.strptime(text, fmt).date()
+            return datetime.combine(date_value, time.max, tzinfo=timezone.utc)
+        except ValueError:
+            pass
+    return None
 
 
 def _score(draw: dict, missing_fields: list[str], warnings: list[str]) -> int:

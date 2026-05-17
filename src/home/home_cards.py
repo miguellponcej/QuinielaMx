@@ -51,6 +51,7 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
             st.warning(
                 "Se descartaron partidos de calendario general porque no coinciden con la quiniela oficial vigente."
             )
+        render_official_reference(draw, expanded=False)
         if draw.get("source_warnings"):
             with st.expander("Notas de fuente"):
                 for warning in draw.get("source_warnings", []):
@@ -104,3 +105,26 @@ def _display_status(value: object) -> str:
         "Vigente": "Vigente",
         "Dato no disponible": "Dato no disponible",
     }.get(str(value), str(value or "Dato no disponible"))
+
+
+def render_official_reference(draw: dict, expanded: bool = True) -> None:
+    """Render official contest image or guide reference."""
+
+    artifacts = [item for item in draw.get("source_artifacts", []) if item.get("url")]
+    guide_sources = [
+        source
+        for source in draw.get("alternate_sources", [])
+        if isinstance(source, str) and (source.lower().endswith(".pdf") or ".pdf?" in source.lower())
+    ]
+    if not artifacts and not guide_sources:
+        return
+    with st.expander("Referencia oficial del concurso", expanded=expanded):
+        st.caption("Imagen o guia tomada de la pagina oficial consultada para este juego.")
+        if artifacts:
+            first = artifacts[0]
+            st.image(first["url"], caption="Imagen oficial publicada por Pronosticos/Loteria Nacional", use_container_width=True)
+            if len(artifacts) > 1:
+                st.caption(f"Hay {len(artifacts)} imagenes oficiales registradas.")
+        if guide_sources:
+            for idx, url in enumerate(guide_sources, start=1):
+                st.link_button(f"Abrir guia oficial {idx}", url)

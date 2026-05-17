@@ -66,3 +66,79 @@ def test_expired_draw_is_marked_closed():
 
     assert validated["status"] == "closed"
     assert "La fecha limite parece vencida." in validated["validation"]["warnings"]
+
+
+def test_closed_sports_result_without_matches_is_not_shown():
+    draw = base_draw("progol", "Progol", "sports_pool", "https://official/results", "oficial_home_resultados", status="closed")
+    draw["draw_number"] = "2332"
+    draw["draw_date"] = "11/05/2026"
+    result = FetchResult(ok=True, draws=[draw], errors=[], sources=["https://official/results"])
+
+    payload = get_active_draws(force_refresh=True, client=FakeClient(result), user_email="test@example.com")
+
+    assert payload["draws"] == []
+    assert payload["summary"]["sports_pools"] == 0
+
+
+def test_official_future_matches_override_past_result_date():
+    result_draw = base_draw(
+        "progol",
+        "Progol",
+        "sports_pool",
+        "https://official/results",
+        "oficial_home_resultados",
+        status="closed",
+    )
+    result_draw["draw_number"] = "2332"
+    result_draw["draw_date"] = "11/05/2026"
+    active_draw = base_draw(
+        "progol",
+        "Progol",
+        "sports_pool",
+        "https://official/quiniela",
+        "oficial_quiniela_structured",
+        status="active",
+    )
+    active_draw["draw_date"] = "2099-01-01T12:00:00+00:00"
+    active_draw["matches"] = [
+        {"id": idx, "local": "A", "visitante": "B", "liga": "Liga", "fecha": "2099-01-01T12:00:00+00:00"}
+        for idx in range(1, 15)
+    ]
+    result = FetchResult(ok=True, draws=[result_draw, active_draw], errors=[], sources=["https://official"])
+
+    payload = get_active_draws(force_refresh=True, client=FakeClient(result), user_email="test@example.com")
+
+    assert payload["summary"]["sports_pools"] == 1
+    assert payload["draws"][0]["status"] == "active"
+    assert payload["draws"][0]["draw_date"] == "2099-01-01T12:00:00+00:00"
+    assert len(payload["draws"][0]["matches"]) == 14
+
+
+def test_generic_espn_fixtures_are_not_actionable_for_official_pool():
+    draw = base_draw(
+        "progol_media_semana",
+        "Progol Media Semana",
+        "sports_pool",
+        "https://official/quiniela",
+        "oficial_quiniela+espn_scoreboard",
+        status="active",
+    )
+    draw["matches"] = [
+        {
+            "id": idx,
+            "local": "Brentford",
+            "visitante": "Crystal Palace",
+            "liga": "Premier League",
+            "fecha": "2099-01-01T12:00:00+00:00",
+            "fuente_partido": "https://site.api.espn.com/apis/site/v2/sports/soccer/eng.1/scoreboard",
+        }
+        for idx in range(1, 10)
+    ]
+    result = FetchResult(ok=True, draws=[draw], errors=[], sources=["https://official/quiniela"])
+
+    payload = get_active_draws(force_refresh=True, client=FakeClient(result), user_email="test@example.com")
+
+    assert payload["draws"][0]["matches"] == []
+    assert payload["draws"][0]["candidate_matches"]
+    assert "Partidos descartados" in payload["draws"][0]["source_errors"][0]
+    assert payload["draws"][0]["recommendation"]["recommendation"] != "Recomendado"

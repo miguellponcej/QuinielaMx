@@ -39,7 +39,7 @@ def build_home_view_model(payload: dict, user: AuthUser) -> dict:
     return {
         "welcome": f"Bienvenido, {user.name}",
         "updated_at": payload.get("updated_at", "Dato no disponible"),
-        "connection_status": "Cache/local" if payload.get("used_cache") else "Fuentes web consultadas",
+        "connection_status": _connection_status(payload, ready),
         "summary": payload.get("summary", {}),
         "draws": draws,
         "recommended": sort_recommendations(draws),
@@ -58,7 +58,17 @@ def build_home_view_model(payload: dict, user: AuthUser) -> dict:
         "errors": payload.get("errors", []),
         "source_diagnostics": payload.get("source_diagnostics", []),
         "used_cache": payload.get("used_cache", False),
-    }
+}
+
+
+def _connection_status(payload: dict, ready: list[dict]) -> str:
+    if ready and payload.get("used_cache"):
+        return "Cache con partidos estructurados"
+    if ready:
+        return "Fuentes web con partidos estructurados"
+    if payload.get("used_cache"):
+        return "Cache/local"
+    return "Fuentes web consultadas"
 
 
 def generate_real_time_prediction(

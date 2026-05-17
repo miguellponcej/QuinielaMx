@@ -20,13 +20,21 @@ Assert-PathExists -Path (Join-Path $TargetRoot ".git") -Label "Repositorio Git d
 $files = @(
     "app\streamlit_app.py",
     "src\active_draws\active_draws_service.py",
+    "src\active_draws\draw_parser.py",
+    "src\active_draws\draw_validator.py",
+    "src\active_draws\official_guide_pdf.py",
     "src\active_draws\official_sources_client.py",
     "src\data_sources\espn_client.py",
     "src\data_sources\source_registry.py",
     "src\home\home_cards.py",
+    "src\home\home_dashboard.py",
+    "src\home\home_recommendations.py",
     "src\prediction\predictor.py",
     "src\realtime\real_time_prediction_pipeline.py",
+    "requirements.txt",
+    "tests\test_active_draws_service.py",
     "tests\test_espn_client.py",
+    "tests\test_official_guide_pdf.py",
     "infra\scripts\sync_production_fixes_to_dev.ps1"
 )
 
@@ -48,13 +56,21 @@ try {
     $gitFiles = @(
         "app/streamlit_app.py",
         "src/active_draws/active_draws_service.py",
+        "src/active_draws/draw_parser.py",
+        "src/active_draws/draw_validator.py",
+        "src/active_draws/official_guide_pdf.py",
         "src/active_draws/official_sources_client.py",
         "src/data_sources/espn_client.py",
         "src/data_sources/source_registry.py",
         "src/home/home_cards.py",
+        "src/home/home_dashboard.py",
+        "src/home/home_recommendations.py",
         "src/prediction/predictor.py",
         "src/realtime/real_time_prediction_pipeline.py",
+        "requirements.txt",
+        "tests/test_active_draws_service.py",
         "tests/test_espn_client.py",
+        "tests/test_official_guide_pdf.py",
         "infra/scripts/sync_production_fixes_to_dev.ps1"
     )
     git add -- $gitFiles

@@ -26,7 +26,7 @@ from src.auth.auth_config import AuthConfig
 from src.auth.auth_service import AuthService
 from src.auth.session_manager import AuthUser
 from src.config.games import GameType, OptimizationGoal, RiskProfile, get_game_config
-from src.home.home_cards import render_draw_card, render_missing_data
+from src.home.home_cards import render_draw_card, render_missing_data, render_official_reference
 from src.home.home_dashboard import (
     build_home_view_model,
     generate_real_time_prediction,
@@ -214,6 +214,8 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
     trace = build_web_trace(selected_draw, payload)
 
     if not selected_draw or not selected_draw.get("matches"):
+        if selected_draw:
+            render_official_reference(selected_draw, expanded=True)
         render_web_data_unavailable(config, selected_draw, payload, trace)
         if page == "Configuracion":
             render_configuration(user, auth.config, trace)
@@ -232,6 +234,8 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
     )
     predictions = realtime_result.predictions
     prediction_df = realtime_result.prediction_frame
+    if page in {"Dashboard", "Prediccion", "Optimizacion", "Simulacion"}:
+        render_official_reference(selected_draw, expanded=True)
 
     if page == "Dashboard":
         render_dashboard(config, quiniela_df, trace)
