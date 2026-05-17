@@ -452,6 +452,7 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         with st.expander("Errores de fuentes"):
             for error in model["errors"]:
                 st.write(f"- {error}")
+    render_next_action(model)
     summary = model["summary"]
     c1, c2, c3, c4, c5 = st.columns(5)
     c1.metric("Juegos", summary.get("total_games", 0))
@@ -551,6 +552,26 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
     render_missing_data(model["draws"])
     with st.expander("Estado de fuentes web consultadas"):
         render_source_diagnostics(model.get("source_diagnostics", []), show_title=False)
+
+
+def render_next_action(model: dict) -> None:
+    """Show the main action in plain language before detailed tables."""
+
+    ready = model.get("ready_for_prediction", [])
+    if ready:
+        best = ready[0]
+        st.success(
+            "Siguiente accion recomendada: genera prediccion para "
+            f"{best.get('game_name', 'el juego disponible')} "
+            f"(No. {best.get('draw_number', 'Dato no disponible')}, "
+            f"fecha {best.get('draw_date', 'Dato no disponible')})."
+        )
+        return
+    manual = model.get("manual_required", [])
+    if manual:
+        st.warning("No hay quinielas listas para predecir. Primero actualiza fuentes web y revisa los datos bloqueantes.")
+        return
+    st.info("No hay una accion prioritaria en este momento. Revisa sorteos informativos o actualiza fuentes.")
 
 
 def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> dict:
