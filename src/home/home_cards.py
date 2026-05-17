@@ -47,6 +47,10 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
         d6.write("Accionable" if can_predict else "Bloqueado" if needs_manual else "Informativo")
         if draw.get("matches"):
             st.caption(f"Partidos estructurados detectados: {len(draw.get('matches', []))}")
+        elif draw.get("candidate_matches"):
+            st.warning(
+                "Se descartaron partidos de calendario general porque no coinciden con la quiniela oficial vigente."
+            )
         if draw.get("source_warnings"):
             with st.expander("Notas de fuente"):
                 for warning in draw.get("source_warnings", []):

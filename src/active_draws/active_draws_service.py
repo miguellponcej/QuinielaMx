@@ -79,6 +79,20 @@ def get_active_draws(
 
 def _prepare_draw(draw: dict, used_cache: bool) -> dict:
     prepared = {**draw}
+    if prepared.get("game_type") == "sports_pool" and "espn_scoreboard" in str(prepared.get("raw_source", "")):
+        prepared["candidate_matches"] = prepared.get("matches") or []
+        prepared["matches"] = []
+        prepared["status"] = "Dato no disponible"
+        prepared["source_errors"] = list(
+            dict.fromkeys(
+                [
+                    *(prepared.get("source_errors") or []),
+                    (
+                        "Partidos descartados: provenian de calendario deportivo generico, no de la quiniela oficial vigente."
+                    ),
+                ]
+            )
+        )
     if used_cache:
         prepared["raw_source"] = f"cache:{prepared.get('raw_source', '')}"
         prepared["data_freshness"] = "antigua" if (cache_age_hours() or 0) > 24 else "aceptable"
@@ -93,6 +107,8 @@ def _cache_needs_structured_fixture_refresh(payload: dict) -> bool:
     sports_draws = [draw for draw in payload.get("draws", []) if draw.get("game_type") == "sports_pool"]
     if not sports_draws:
         return False
+    if any("espn_scoreboard" in str(draw.get("raw_source", "")) for draw in sports_draws):
+        return True
     if all(not draw.get("matches") for draw in sports_draws):
         return True
     return any(_is_stale_sports_draw(draw) for draw in sports_draws)
