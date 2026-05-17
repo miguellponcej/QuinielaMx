@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import streamlit as st
 
-from src.home.home_recommendations import can_generate_prediction, display_status, recommended_action, requires_manual_load
+from src.home.home_recommendations import can_generate_prediction, recommended_action, requires_manual_load
 
 
 BADGE_LABELS = {
@@ -27,7 +27,7 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
         st.caption(badge)
         cols = st.columns(5)
         cols[0].metric("No. juego", draw.get("draw_number", "Dato no disponible"))
-        cols[1].metric("Estado", display_status(draw.get("status")))
+        cols[1].metric("Estado", _display_status(draw.get("status")))
         cols[2].metric("Calidad", f"{draw.get('data_quality_score', 0)}/100")
         cols[3].metric("Score", f"{rec.get('recommendation_score', 0)}/100")
         cols[4].metric("Listo", "Si" if can_predict else "No")
@@ -93,3 +93,14 @@ def render_missing_data(draws: list[dict]) -> None:
         st.dataframe(rows, use_container_width=True)
     else:
         st.success("No hay datos faltantes registrados.")
+
+
+def _display_status(value: object) -> str:
+    """Return status text that is easy to understand in the UI."""
+
+    return {
+        "active": "Vigente",
+        "closed": "Cerrado",
+        "Vigente": "Vigente",
+        "Dato no disponible": "Dato no disponible",
+    }.get(str(value), str(value or "Dato no disponible"))
