@@ -25,13 +25,14 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
     with st.container(border=True):
         st.markdown(f"### {draw.get('game_name', 'Dato no disponible')}")
         st.caption(badge)
-        cols = st.columns(4)
-        cols[0].metric("Estado", draw.get("status", "Dato no disponible"))
-        cols[1].metric("Calidad", f"{draw.get('data_quality_score', 0)}/100")
-        cols[2].metric("Score", f"{rec.get('recommendation_score', 0)}/100")
-        cols[3].metric("Listo", "Si" if can_predict else "No")
+        cols = st.columns(5)
+        cols[0].metric("No. juego", draw.get("draw_number", "Dato no disponible"))
+        cols[1].metric("Estado", draw.get("status", "Dato no disponible"))
+        cols[2].metric("Calidad", f"{draw.get('data_quality_score', 0)}/100")
+        cols[3].metric("Score", f"{rec.get('recommendation_score', 0)}/100")
+        cols[4].metric("Listo", "Si" if can_predict else "No")
         d1, d2, d3 = st.columns(3)
-        d1.caption("Fecha sorteo")
+        d1.caption("Fecha de celebracion")
         d1.write(draw.get("draw_date", "Dato no disponible"))
         d2.caption("Fecha limite")
         d2.write(draw.get("closing_date", "Dato no disponible"))
@@ -76,6 +77,8 @@ def render_missing_data(draws: list[dict]) -> None:
             rows.append(
                 {
                     "juego": draw.get("game_name"),
+                    "numero_juego": draw.get("draw_number", "Dato no disponible"),
+                    "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
                     "impacto": "Bloquea prediccion" if blocking else "Opcional / mejora calidad",
                     "faltantes": ", ".join(dict.fromkeys(missing)) if missing else "Ninguno",
                     "fuente_no_respondio": ", ".join(errors) if errors else "Ninguna",

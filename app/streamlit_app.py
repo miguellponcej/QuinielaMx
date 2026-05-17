@@ -440,7 +440,7 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
     st.subheader("Home")
     col_a, col_b = st.columns([3, 1])
     force_refresh = col_b.button("Actualizar sorteos vigentes")
-    payload = load_active_draws_home_dashboard(auth, force_refresh=force_refresh)
+    payload = load_home_payload_with_progress(auth, force_refresh=force_refresh)
     model = build_home_view_model(payload, user)
     col_a.markdown(f"### {model['welcome']}")
     st.caption(f"Ultima actualizacion: {model['updated_at']} | Estado: {model['connection_status']}")
@@ -473,8 +473,11 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         cols = [
             "prioridad",
             "juego",
+            "numero_juego",
+            "fecha_celebracion",
             "tipo",
             "estado",
+            "cierre",
             "calidad_datos",
             "recomendacion",
             "score",
@@ -491,6 +494,8 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         ready_rows = [
             {
                 "juego": draw.get("game_name"),
+                "numero_juego": draw.get("draw_number", "Dato no disponible"),
+                "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
                 "calidad_datos": draw.get("data_quality_score"),
                 "cierre": draw.get("closing_date", "Dato no disponible"),
                 "partidos": len(draw.get("matches", [])),
@@ -505,6 +510,8 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         manual_rows = [
             {
                 "juego": draw.get("game_name"),
+                "numero_juego": draw.get("draw_number", "Dato no disponible"),
+                "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
                 "faltantes": ", ".join(draw.get("missing_fields", [])) or "partidos estructurados",
                 "accion": "Actualizar fuentes web",
             }
@@ -524,6 +531,11 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         st.session_state["selected_active_game_id"] = selected_action["game_id"]
         st.session_state["selected_home_action"] = selected_action["action"]
         if selected_action["can_generate_prediction"]:
+            st.info(
+                "Referencia: "
+                f"No. juego {selected_draw.get('draw_number', 'Dato no disponible')} | "
+                f"Fecha de celebracion {selected_draw.get('draw_date', 'Dato no disponible')}"
+            )
             result = generate_real_time_prediction(
                 selected_action["game_id"],
                 selected_draw.get("matches", []),
@@ -539,6 +551,29 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
     render_missing_data(model["draws"])
     with st.expander("Estado de fuentes web consultadas"):
         render_source_diagnostics(model.get("source_diagnostics", []), show_title=False)
+
+
+def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> dict:
+    """Load Home payload with visible progress feedback."""
+
+    if not force_refresh:
+        with st.spinner("Cargando sorteos vigentes y recomendaciones..."):
+            return load_active_draws_home_dashboard(auth, force_refresh=False)
+
+    progress_text = st.empty()
+    progress_bar = st.progress(0)
+    progress_text.write("Validando sesion privada...")
+    progress_bar.progress(15)
+    progress_text.write("Consultando fuentes oficiales, cache y fuentes deportivas estructuradas...")
+    progress_bar.progress(35)
+    payload = load_active_draws_home_dashboard(auth, force_refresh=True)
+    progress_text.write("Validando frescura, datos faltantes y partidos estructurados...")
+    progress_bar.progress(70)
+    progress_text.write("Calculando recomendaciones y prioridad de analisis...")
+    progress_bar.progress(90)
+    progress_bar.progress(100)
+    progress_text.success("Actualizacion terminada.")
+    return payload
 
 
 def render_source_diagnostics(diagnostics: list[dict], show_title: bool = True) -> None:
