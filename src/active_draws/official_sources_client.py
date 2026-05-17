@@ -206,6 +206,7 @@ def _merge_draw(existing: dict, incoming: dict) -> None:
     incoming_url = incoming.get("official_url")
     if incoming_url and incoming_url != existing.get("official_url"):
         existing["alternate_sources"].append(incoming_url)
+    incoming_has_matches = bool(incoming.get("matches"))
     for field in [
         "draw_number",
         "closing_date",
@@ -217,13 +218,20 @@ def _merge_draw(existing: dict, incoming: dict) -> None:
     ]:
         if _is_missing(existing.get(field)) and not _is_missing(incoming.get(field)):
             existing[field] = incoming[field]
-    if incoming.get("raw_source") == "oficial_quiniela":
+        elif incoming_has_matches and field in {"draw_number", "draw_date", "status"} and not _is_missing(incoming.get(field)):
+            existing[field] = incoming[field]
+    if incoming.get("raw_source") == "oficial_quiniela" or incoming_has_matches:
         existing["official_url"] = incoming.get("official_url", existing.get("official_url"))
-    existing["matches"] = existing.get("matches") or incoming.get("matches") or []
+    existing["matches"] = incoming.get("matches") or existing.get("matches") or []
     existing["source_errors"] = list(
         dict.fromkeys([*(existing.get("source_errors") or []), *(incoming.get("source_errors") or [])])
     )
     existing["source_artifacts"] = [*(existing.get("source_artifacts") or []), *(incoming.get("source_artifacts") or [])]
+    existing["source_warnings"] = list(
+        dict.fromkeys([*(existing.get("source_warnings") or []), *(incoming.get("source_warnings") or [])])
+    )
+    for flag in ["has_recent_sports_data", "has_market_data"]:
+        existing[flag] = bool(existing.get(flag) or incoming.get(flag))
     if incoming.get("data_freshness") == "actualizada":
         existing["data_freshness"] = "actualizada"
     existing["raw_source"] = "+".join(dict.fromkeys([existing.get("raw_source", ""), incoming.get("raw_source", "")]))
@@ -242,7 +250,7 @@ def _attach_fixture_fallback(draw: dict, matches: list[dict], sources: list[str]
     draw["raw_source"] = f"{draw.get('raw_source', '')}+espn_scoreboard"
     draw["has_recent_sports_data"] = True
     draw["has_market_data"] = any(match.get("linea_mercado") not in (None, "", "Dato no disponible") for match in matches)
-    if _is_missing(draw.get("draw_date")) and matches:
+    if matches:
         draw["draw_date"] = matches[0].get("fecha", "Dato no disponible")
     draw.setdefault("alternate_sources", [])
     draw["alternate_sources"] = list(dict.fromkeys([*draw["alternate_sources"], *sources]))

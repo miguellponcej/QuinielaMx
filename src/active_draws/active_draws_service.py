@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime, timezone
+from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
 
 from src.active_draws.draw_cache import (
@@ -58,6 +58,7 @@ def get_active_draws(
             else:
                 payload = {"saved_at": datetime.now(timezone.utc).isoformat(), "draws": result.draws}
     draws = [_prepare_draw(draw, used_cache) for draw in payload.get("draws", [])]
+    draws = [draw for draw in draws if _should_show_draw(draw)]
     probe = []
     if (force_refresh or not used_cache) and hasattr(client, "probe_trusted_sources"):
         probe = client.probe_trusted_sources()
@@ -92,7 +93,30 @@ def _cache_needs_structured_fixture_refresh(payload: dict) -> bool:
     sports_draws = [draw for draw in payload.get("draws", []) if draw.get("game_type") == "sports_pool"]
     if not sports_draws:
         return False
-    return all(not draw.get("matches") for draw in sports_draws)
+    if all(not draw.get("matches") for draw in sports_draws):
+        return True
+    return any(_is_stale_sports_draw(draw) for draw in sports_draws)
+
+
+def _should_show_draw(draw: dict) -> bool:
+    """Hide stale sports results that are not actionable active quinielas."""
+
+    if draw.get("game_type") != "sports_pool":
+        return True
+    if draw.get("matches"):
+        return not _is_stale_sports_draw(draw)
+    return draw.get("status") != "closed"
+
+
+def _is_stale_sports_draw(draw: dict) -> bool:
+    if draw.get("game_type") != "sports_pool":
+        return False
+    if draw.get("matches"):
+        parsed_dates = [_parse_datetime(match.get("fecha")) for match in draw.get("matches", [])]
+        known_dates = [parsed for parsed in parsed_dates if parsed is not None]
+        if known_dates and max(known_dates) < datetime.now(timezone.utc):
+            return True
+    return draw.get("status") == "closed" or _is_past_date(draw.get("draw_date"))
 
 
 def summarize_active_draws(draws: list[dict]) -> dict:
@@ -122,13 +146,26 @@ def _parse_datetime(value: object) -> datetime | None:
         return None
     if not isinstance(value, str):
         return None
+    parsed = None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                parsed = datetime.combine(datetime.strptime(value, fmt).date(), datetime_time.max)
+                break
+            except ValueError:
+                continue
+    if parsed is None:
         return None
     if parsed.tzinfo is None:
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed.astimezone(timezone.utc)
+
+
+def _is_past_date(value: object) -> bool:
+    parsed = _parse_datetime(value)
+    return parsed is not None and parsed < datetime.now(timezone.utc)
 
 
 def log_active_draws_update(response: dict, user_email: str = "unknown") -> Path:
