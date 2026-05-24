@@ -17,12 +17,12 @@ def build_decision_rows(draws: list[dict]) -> list[dict]:
         rows.append(
             {
                 "prioridad": position,
-                "juego": draw.get("game_name", "Dato no disponible"),
-                "numero_juego": draw.get("draw_number", "Dato no disponible"),
-                "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
+                "juego": draw.get("game_name", "Pendiente"),
+                "numero_juego": _display_value(draw.get("draw_number")),
+                "fecha_celebracion": _display_value(draw.get("draw_date")),
                 "tipo": _display_game_type(draw.get("game_type")),
                 "estado": display_status(draw.get("status")),
-                "cierre": draw.get("closing_date", "Dato no disponible"),
+                "cierre": _display_value(draw.get("closing_date")),
                 "calidad_datos": draw.get("data_quality_score", 0),
                 "recomendacion": rec.get("recommendation", "Dato no disponible"),
                 "score": rec.get("recommendation_score", 0),
@@ -104,8 +104,8 @@ def display_status(value: object) -> str:
         "active": "Vigente",
         "closed": "Cerrado",
         "Vigente": "Vigente",
-        "Dato no disponible": "Dato no disponible",
-    }.get(str(value), str(value or "Dato no disponible"))
+        "Dato no disponible": "Pendiente",
+    }.get(str(value), str(value or "Pendiente"))
 
 
 def ready_for_prediction(draws: list[dict]) -> list[dict]:
@@ -179,4 +179,10 @@ def _display_game_type(value: object) -> str:
         "sports_pool": "Quiniela deportiva",
         "random_lottery": "Sorteo aleatorio",
         "special_draw": "Sorteo especial",
-    }.get(str(value), "Dato no disponible")
+    }.get(str(value), "Pendiente")
+
+
+def _display_value(value: object) -> str:
+    if value in (None, "", "Dato no disponible"):
+        return "Pendiente"
+    return str(value)

@@ -287,11 +287,15 @@ def render_random_draw_page(auth: AuthService) -> None:
 def render_web_data_unavailable(config, draw: dict | None, payload: dict, trace) -> None:
     """Explain why a web-only prediction cannot run yet."""
 
-    st.subheader(f"{config.name}: datos web insuficientes")
+    st.subheader(f"{config.name}: prediccion pendiente")
+    st.info(
+        "Ya se consultaron las fuentes oficiales y de mercado disponibles. Para emitir una prediccion confiable, "
+        "la quiniela debe estar disponible como partidos con local, visitante, liga y fecha. Si la fuente oficial "
+        "solo publica imagen o guia, se muestra como evidencia, pero no se sustituyen datos con calendarios genericos."
+    )
     st.warning(
-        "La prediccion se pauso porque las fuentes consultadas aun no entregaron partidos estructurados "
-        "con local, visitante, liga y fecha. Se registraron fuentes oficiales, TuLotero, casas de apuestas "
-        "y APIs de momios disponibles para reintento; no se usaran cargas manuales ni datos inventados."
+        "Siguiente accion: presiona Actualizar fuentes web cuando el concurso se publique en formato legible. "
+        "La app no inventa partidos ni momios."
     )
     if draw:
         st.dataframe(
@@ -302,8 +306,8 @@ def render_web_data_unavailable(config, draw: dict | None, payload: dict, trace)
                     "actualizado": draw.get("last_updated"),
                     "frescura": draw.get("data_freshness"),
                     "calidad": draw.get("data_quality_score"),
-                    "faltantes": ", ".join(draw.get("missing_fields", [])) or "Ninguno",
-                    "notas": ", ".join(draw.get("source_warnings", [])) or "Sin notas",
+                    "faltantes": _human_missing_fields(draw.get("missing_fields", [])) or "Ninguno",
+                    "notas": _friendly_source_notes(draw) or "Fuente consultada; esperando datos estructurados.",
                 }
             ],
             use_container_width=True,
@@ -469,7 +473,7 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
     decision = model["decision_center"]
     d1, d2, d3, d4 = st.columns(4)
     d1.metric("Listos para predecir", decision.get("ready_count", 0))
-    d2.metric("Bloqueados por datos", decision.get("manual_count", 0))
+    d2.metric("Pendientes de datos", decision.get("manual_count", 0))
     d3.metric("Mejor calidad", decision.get("best_quality_game", "Dato no disponible"))
     d4.metric("Cierra primero", decision.get("next_closing_game", "Dato no disponible"))
     st.caption(f"Fecha de cierre mas proxima: {decision.get('next_closing_date', 'Dato no disponible')}")
@@ -511,13 +515,13 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
         st.dataframe(ready_rows, use_container_width=True, hide_index=True)
 
     if model["manual_required"]:
-        st.subheader("Bloqueados por datos")
+        st.subheader("Pendientes de datos web")
         manual_rows = [
             {
                 "juego": draw.get("game_name"),
-                "numero_juego": draw.get("draw_number", "Dato no disponible"),
-                "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
-                "faltantes": ", ".join(draw.get("missing_fields", [])) or "partidos estructurados",
+                "numero_juego": _display_value(draw.get("draw_number")),
+                "fecha_celebracion": _display_value(draw.get("draw_date")),
+                "faltantes": _human_missing_fields(draw.get("missing_fields", [])) or "partidos oficiales en formato legible",
                 "accion": "Actualizar fuentes web",
             }
             for draw in model["manual_required"]
@@ -573,9 +577,42 @@ def render_next_action(model: dict) -> None:
         return
     manual = model.get("manual_required", [])
     if manual:
-        st.warning("No hay quinielas listas para predecir. Primero actualiza fuentes web y revisa los datos bloqueantes.")
+        st.warning(
+            "Las quinielas deportivas estan detectadas, pero aun falta informacion estructurada para predecir. "
+            "Revisa la referencia oficial y actualiza fuentes web antes de generar jugadas."
+        )
         return
     st.info("No hay una accion prioritaria en este momento. Revisa sorteos informativos o actualiza fuentes.")
+
+
+def _human_missing_fields(fields: list[str]) -> str:
+    labels = {
+        "matches": "partidos oficiales en formato legible",
+        "partidos estructurados": "partidos oficiales en formato legible",
+        "closing_date": "fecha limite",
+        "draw_date": "fecha de celebracion",
+        "cost_per_entry": "costo",
+        "estimated_prize": "premio",
+        "accumulated_pool": "bolsa",
+    }
+    return ", ".join(dict.fromkeys(labels.get(field, field) for field in fields))
+
+
+def _display_value(value: object) -> str:
+    if value in (None, "", "Dato no disponible"):
+        return "Pendiente"
+    return str(value)
+
+
+def _friendly_source_notes(draw: dict) -> str:
+    notes = []
+    if draw.get("source_artifacts"):
+        notes.append("Referencia visual oficial registrada.")
+    if draw.get("alternate_sources"):
+        notes.append("Guia o fuente alterna oficial registrada.")
+    if draw.get("source_warnings"):
+        notes.extend(str(item) for item in draw.get("source_warnings", []))
+    return " ".join(notes)
 
 
 def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> dict:

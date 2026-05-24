@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import streamlit as st
-import streamlit.components.v1 as components
 
 from src.home.home_recommendations import can_generate_prediction, recommended_action, requires_manual_load
 
@@ -27,25 +26,29 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
         st.markdown(f"### {draw.get('game_name', 'Dato no disponible')}")
         st.caption(badge)
         cols = st.columns(5)
-        cols[0].metric("No. juego", draw.get("draw_number", "Dato no disponible"))
+        cols[0].metric("No. juego", _display_value(draw.get("draw_number")))
         cols[1].metric("Estado", _display_status(draw.get("status")))
         cols[2].metric("Calidad", f"{draw.get('data_quality_score', 0)}/100")
         cols[3].metric("Score", f"{rec.get('recommendation_score', 0)}/100")
         cols[4].metric("Listo", "Si" if can_predict else "No")
         d1, d2, d3 = st.columns(3)
         d1.caption("Fecha de celebracion")
-        d1.write(draw.get("draw_date", "Dato no disponible"))
+        d1.write(_display_value(draw.get("draw_date")))
         d2.caption("Fecha limite")
-        d2.write(draw.get("closing_date", "Dato no disponible"))
+        d2.write(_display_value(draw.get("closing_date")))
         d3.caption("Premio/bolsa")
-        d3.write(draw.get("estimated_prize") or draw.get("accumulated_pool") or "Dato no disponible")
+        d3.write(_display_value(draw.get("estimated_prize") or draw.get("accumulated_pool")))
         d4, d5, d6 = st.columns(3)
         d4.caption("Costo")
-        d4.write(draw.get("cost_per_entry", "Dato no disponible"))
+        d4.write(_display_value(draw.get("cost_per_entry")))
         d5.caption("Fuente principal")
-        d5.write(draw.get("official_url", "Dato no disponible"))
+        official_url = draw.get("official_url")
+        if official_url and official_url != "Dato no disponible":
+            d5.link_button("Abrir fuente oficial", str(official_url))
+        else:
+            d5.write("Pendiente")
         d6.caption("Estado de datos")
-        d6.write("Accionable" if can_predict else "Bloqueado" if needs_manual else "Informativo")
+        d6.write("Listo para predecir" if can_predict else "Pendiente de datos web" if needs_manual else "Informativo")
         if draw.get("matches"):
             st.caption(f"Partidos estructurados detectados: {len(draw.get('matches', []))}")
         elif draw.get("candidate_matches"):
@@ -58,7 +61,7 @@ def render_draw_card(draw: dict, key_prefix: str = "draw") -> dict | None:
             with st.expander("Notas de fuente"):
                 for warning in draw.get("source_warnings", []):
                     st.write(f"- {warning}")
-        st.info(rec.get("reason", "Dato no disponible"))
+        st.info(_product_reason(draw, rec, can_predict, needs_manual))
         action = recommended_action(draw)
         if st.button(action, key=f"{key_prefix}_{draw.get('game_id')}", type="primary" if can_predict else "secondary"):
             return {
@@ -84,10 +87,10 @@ def render_missing_data(draws: list[dict]) -> None:
             rows.append(
                 {
                     "juego": draw.get("game_name"),
-                    "numero_juego": draw.get("draw_number", "Dato no disponible"),
-                    "fecha_celebracion": draw.get("draw_date", "Dato no disponible"),
-                    "impacto": "Bloquea prediccion" if blocking else "Opcional / mejora calidad",
-                    "faltantes": ", ".join(dict.fromkeys(missing)) if missing else "Ninguno",
+                    "numero_juego": _display_value(draw.get("draw_number")),
+                    "fecha_celebracion": _display_value(draw.get("draw_date")),
+                    "impacto": "Impide prediccion automatica" if blocking else "Mejora recomendacion",
+                    "faltantes": _human_missing_fields(missing) if missing else "Ninguno",
                     "fuente_no_respondio": ", ".join(errors) if errors else "Ninguna",
                     "accion": "Actualizar fuentes web" if blocking else "No impide predecir",
                 }
@@ -105,8 +108,16 @@ def _display_status(value: object) -> str:
         "active": "Vigente",
         "closed": "Cerrado",
         "Vigente": "Vigente",
-        "Dato no disponible": "Dato no disponible",
-    }.get(str(value), str(value or "Dato no disponible"))
+        "Dato no disponible": "Pendiente",
+    }.get(str(value), str(value or "Pendiente"))
+
+
+def _display_value(value: object) -> str:
+    """Return friendlier text for missing values."""
+
+    if value in (None, "", "Dato no disponible"):
+        return "Pendiente"
+    return str(value)
 
 
 def render_official_reference(draw: dict, expanded: bool = True) -> None:
@@ -142,7 +153,7 @@ def render_official_reference(draw: dict, expanded: bool = True) -> None:
     if not image_artifacts and not guide_sources and not official_url:
         return
     with st.expander("Referencia oficial del concurso", expanded=expanded):
-        st.caption("Referencia tomada de la pagina oficial consultada para este juego.")
+        st.caption("Evidencia tomada de la fuente oficial consultada para este juego.")
         if image_artifacts:
             first_image = image_artifacts[0]
             st.image(
@@ -152,11 +163,38 @@ def render_official_reference(draw: dict, expanded: bool = True) -> None:
             )
             if len(image_artifacts) > 1:
                 st.caption(f"Hay {len(image_artifacts)} imagenes oficiales registradas.")
+            st.success("Referencia visual oficial cargada correctamente.")
         if guide_sources:
             st.markdown("**Guia oficial vigente**")
-            st.caption("Si la vista previa no carga en este navegador, abre la guia oficial con el boton.")
-            components.iframe(guide_sources[0], height=560, scrolling=True)
+            st.caption(
+                "La guia oficial se abre en una pestaña nueva para evitar bloqueos del navegador. "
+                "No se incrusta como iframe externo."
+            )
             for idx, url in enumerate(guide_sources, start=1):
                 st.link_button(f"Abrir guia oficial {idx}", url)
         if official_url:
             st.link_button("Abrir pagina oficial consultada", str(official_url))
+
+
+def _human_missing_fields(fields: list[str]) -> str:
+    labels = {
+        "matches": "partidos oficiales en formato legible",
+        "partidos estructurados": "partidos oficiales en formato legible",
+        "closing_date": "fecha limite",
+        "draw_date": "fecha de celebracion",
+        "cost_per_entry": "costo",
+        "estimated_prize": "premio",
+        "accumulated_pool": "bolsa",
+    }
+    return ", ".join(dict.fromkeys(labels.get(field, field) for field in fields))
+
+
+def _product_reason(draw: dict, rec: dict, can_predict: bool, needs_manual: bool) -> str:
+    if can_predict:
+        return rec.get("reason", "Juego listo para generar una prediccion probabilistica.")
+    if draw.get("game_type") == "sports_pool" and needs_manual:
+        return (
+            "La fuente oficial fue consultada y queda registrada, pero aun falta convertir la quiniela vigente "
+            "a partidos estructurados. La app no inventa partidos ni usa calendarios genericos."
+        )
+    return rec.get("reason", "Informacion disponible para analisis.")
