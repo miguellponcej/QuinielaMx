@@ -11,6 +11,7 @@ from dataclasses import dataclass
 
 from src.active_draws.draw_parser import base_draw, parse_home_results, parse_quiniela_page, parse_tulotero_home
 from src.active_draws.official_guide_pdf import extract_guide_pdf_urls, fetch_guide_pdf_draw
+from src.active_draws.progol_es_client import parse_progol_es_reference, secondary_url_for_game
 from src.data_sources.source_registry import TRUSTED_WEB_SOURCES, WebSource
 
 try:
@@ -171,6 +172,21 @@ class OfficialSourcesClient:
                 if ai_draw and ai_draw.get("matches"):
                     _merge_draw(draw, ai_draw)
             if not draw.get("matches"):
+                secondary_draw, secondary_errors, secondary_sources = self._fetch_secondary_program_reference(game_id, game_name)
+                guide_errors.extend(secondary_errors)
+                if secondary_draw:
+                    _merge_draw(draw, secondary_draw)
+                    secondary_ai_draw, secondary_ai_errors = extract_draw_with_ai(
+                        game_id,
+                        game_name,
+                        secondary_sources,
+                        context_text="Fuente secundaria especializada Progol.es. Extrae solo programa/momios vigente.",
+                        timeout_seconds=max(30, self.timeout_seconds),
+                    )
+                    guide_errors.extend(secondary_ai_errors)
+                    if secondary_ai_draw and secondary_ai_draw.get("matches"):
+                        _merge_draw(draw, secondary_ai_draw)
+            if not draw.get("matches"):
                 draw["source_warnings"] = list(
                     dict.fromkeys(
                         [
@@ -187,6 +203,17 @@ class OfficialSourcesClient:
         else:
             sources = [url]
         return FetchResult(ok=bool(draw.get("matches")), draws=[draw], errors=[], sources=sources)
+
+    def _fetch_secondary_program_reference(self, game_id: str, game_name: str) -> tuple[dict | None, list[str], list[str]]:
+        secondary_url = secondary_url_for_game(game_id)
+        if not secondary_url:
+            return None, [], []
+        html, error = self._fetch_url(secondary_url)
+        if error:
+            return None, [error], [secondary_url]
+        draw = parse_progol_es_reference(html, game_id, game_name, secondary_url)
+        sources = [secondary_url, *[item.get("url") for item in draw.get("source_artifacts", []) if item.get("url")]]
+        return draw, [], list(dict.fromkeys(sources))
 
     def _fetch_url(self, url: str) -> tuple[str, str | None]:
         request = urllib.request.Request(

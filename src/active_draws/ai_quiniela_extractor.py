@@ -23,6 +23,7 @@ from src.ai.llm_clients import (
 
 
 OFFICIAL_HOSTS = {"pronosticos.gob.mx", "www.pronosticos.gob.mx", "loterianacional.gob.mx", "www.loterianacional.gob.mx"}
+SECONDARY_HOSTS = {"progol.es", "www.progol.es"}
 
 
 def ai_extraction_enabled() -> bool:
@@ -43,15 +44,15 @@ def extract_draw_with_ai(
     errors: list[str] = []
     if not ai_extraction_enabled():
         return None, ["Extraccion IA desactivada por ENABLE_AI_EXTRACTION."]
-    official_urls = [url for url in source_urls if _is_official_url(url)]
-    if not official_urls:
-        return None, ["Extraccion IA omitida: no hay URL oficial permitida."]
+    allowed_urls = [url for url in source_urls if _is_allowed_reference_url(url)]
+    if not allowed_urls:
+        return None, ["Extraccion IA omitida: no hay URL oficial/secundaria permitida."]
     if not openai_available() and not anthropic_available():
         return None, ["Extraccion IA omitida: configura OPENAI_API_KEY o ANTHROPIC_API_KEY."]
 
     text_chunks = [context_text]
     images: list[dict[str, str]] = []
-    for url in official_urls[:4]:
+    for url in allowed_urls[:4]:
         content, mime_type, error = _fetch_binary(url, timeout_seconds=timeout_seconds)
         if error:
             errors.append(error)
@@ -66,7 +67,7 @@ def extract_draw_with_ai(
         elif mime_type.startswith("image/"):
             images.append(_image_payload(content, mime_type))
 
-    prompt = _build_prompt(game_id, game_name, "\n\n".join(chunk for chunk in text_chunks if chunk), official_urls)
+    prompt = _build_prompt(game_id, game_name, "\n\n".join(chunk for chunk in text_chunks if chunk), allowed_urls)
     responses = []
     if openai_available():
         responses.append(call_openai_json(prompt, images=images, timeout_seconds=timeout_seconds))
@@ -80,7 +81,7 @@ def extract_draw_with_ai(
         if parse_error:
             errors.append(f"{response.provider}: {parse_error}")
             continue
-        draw = _draw_from_ai_payload(parsed, game_id, game_name, official_urls[0], response.provider)
+        draw = _draw_from_ai_payload(parsed, game_id, game_name, allowed_urls[0], response.provider)
         if _validate_draw(draw, game_id):
             return draw, errors
         errors.append(f"{response.provider}: respuesta IA sin partidos validos o conteo incorrecto.")
@@ -91,15 +92,16 @@ def _build_prompt(game_id: str, game_name: str, context_text: str, source_urls: 
     expected = EXPECTED_MATCHES.get(game_id, 0)
     return f"""
 Eres un extractor de datos deportivos. Extrae SOLO la quiniela oficial vigente de {game_name}.
-Fuentes oficiales consultadas: {", ".join(source_urls)}
+Fuentes consultadas: {", ".join(source_urls)}
 Numero esperado de partidos/casilleros: {expected or "desconocido"}.
 
 Reglas:
 - Devuelve exclusivamente JSON valido.
 - No inventes equipos.
 - Si no puedes leer un partido, omite ese partido.
-- Usa equipo local y visitante tal como aparezcan en la guia oficial.
+- Usa equipo local y visitante tal como aparezcan en la guia/programa consultado.
 - No uses calendarios genericos externos.
+- Si la fuente es secundaria, extrae solo el programa/momios visible en esa fuente, no resultados historicos.
 
 Formato:
 {{
@@ -121,8 +123,9 @@ def _draw_from_ai_payload(payload: dict[str, Any], game_id: str, game_name: str,
     draw["draw_date"] = str(payload.get("draw_date") or "Dato no disponible")
     draw["data_freshness"] = "actualizada"
     draw["has_recent_sports_data"] = True
+    source_label = "fuente oficial" if _is_official_url(official_url) else "fuente secundaria"
     draw["source_warnings"] = [
-        f"Partidos estructurados por IA ({provider}) a partir de referencia oficial. Validar visualmente antes de jugar."
+        f"Partidos estructurados por IA ({provider}) a partir de {source_label}. Validar visualmente antes de jugar."
     ]
     matches = []
     for raw in payload.get("matches", []) or []:
@@ -158,7 +161,7 @@ def _validate_draw(draw: dict, game_id: str) -> bool:
     ids = sorted(int(match.get("id", 0)) for match in matches)
     if expected and ids != list(range(1, expected + 1)):
         return False
-    return _is_official_url(str(draw.get("official_url", "")))
+    return _is_allowed_reference_url(str(draw.get("official_url", "")))
 
 
 def _parse_ai_json(text: str) -> tuple[dict[str, Any], str | None]:
@@ -213,6 +216,11 @@ def _image_payload(content: bytes, mime_type: str) -> dict[str, str]:
 def _is_official_url(url: str) -> bool:
     host = urllib.parse.urlparse(url).netloc.lower()
     return host in OFFICIAL_HOSTS
+
+
+def _is_allowed_reference_url(url: str) -> bool:
+    host = urllib.parse.urlparse(url).netloc.lower()
+    return host in OFFICIAL_HOSTS or host in SECONDARY_HOSTS
 
 
 def _clean_team(value: Any) -> str:

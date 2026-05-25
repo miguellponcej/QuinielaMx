@@ -95,6 +95,17 @@ TRUSTED_WEB_SOURCES: tuple[WebSource, ...] = (
         "Respaldo periodistico para resultados recientes, no sustituye fuente oficial.",
     ),
     WebSource(
+        "progol_es_programa",
+        "Progol.es - Programa y momios",
+        "https://www.progol.es/",
+        "secondary_program",
+        72,
+        ("progol", "progol_revancha", "progol_media_semana"),
+        ("program_image", "market_odds_reference"),
+        "public_html_best_effort",
+        "Fuente secundaria especializada; solo se usa como apoyo cuando la fuente oficial no entrega partidos estructurados.",
+    ),
+    WebSource(
         "caliente_liga_mx",
         "Caliente.mx - Liga MX",
         "https://sports.caliente.mx/es_MX/Liga-MX",

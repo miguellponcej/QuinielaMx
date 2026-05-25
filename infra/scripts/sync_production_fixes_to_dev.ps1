@@ -25,6 +25,7 @@ $files = @(
     "src\active_draws\ai_quiniela_extractor.py",
     "src\active_draws\official_guide_pdf.py",
     "src\active_draws\official_sources_client.py",
+    "src\active_draws\progol_es_client.py",
     "src\ai\__init__.py",
     "src\ai\llm_clients.py",
     "src\data_sources\espn_client.py",
@@ -48,6 +49,7 @@ $files = @(
     "tests\test_espn_client.py",
     "tests\test_official_guide_pdf.py",
     "tests\test_prediction_history.py",
+    "tests\test_progol_es_client.py",
     "infra\scripts\sync_production_fixes_to_dev.ps1"
 )
 
@@ -74,6 +76,7 @@ try {
         "src/active_draws/ai_quiniela_extractor.py",
         "src/active_draws/official_guide_pdf.py",
         "src/active_draws/official_sources_client.py",
+        "src/active_draws/progol_es_client.py",
         "src/ai/__init__.py",
         "src/ai/llm_clients.py",
         "src/data_sources/espn_client.py",
@@ -97,6 +100,7 @@ try {
         "tests/test_espn_client.py",
         "tests/test_official_guide_pdf.py",
         "tests/test_prediction_history.py",
+        "tests/test_progol_es_client.py",
         "infra/scripts/sync_production_fixes_to_dev.ps1"
     )
     git add -- $gitFiles
