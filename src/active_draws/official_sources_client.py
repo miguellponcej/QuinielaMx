@@ -10,9 +10,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from src.active_draws.draw_parser import base_draw, parse_home_results, parse_quiniela_page, parse_tulotero_home
-from src.active_draws.ai_quiniela_extractor import extract_draw_with_ai
 from src.active_draws.official_guide_pdf import extract_guide_pdf_urls, fetch_guide_pdf_draw
 from src.data_sources.source_registry import TRUSTED_WEB_SOURCES, WebSource
+
+try:
+    from src.active_draws.ai_quiniela_extractor import extract_draw_with_ai
+except ModuleNotFoundError:
+    def extract_draw_with_ai(*args, **kwargs):
+        return None, ["Extractor IA no disponible en esta version desplegada."]
 
 
 OFFICIAL_URLS = {

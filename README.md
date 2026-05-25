@@ -20,6 +20,8 @@ Este proyecto no garantiza premios ni resultados. Los juegos deportivos tienen i
 - Interfaz Streamlit con dashboard, prediccion, optimizacion, simulacion e historicos.
 - Home privado con consulta de sorteos/quinielas vigentes, cache, logs y recomendaciones automaticas por juego.
 - Pipeline auditado `real_time_prediction_pipeline()` para que los flujos de app generen predicciones solo con trazabilidad de fuentes.
+- Extraccion automatica de guias oficiales en PDF/imagen: primero parser determinista y, si hace falta, IA opcional con OpenAI/Claude.
+- Historial privado de predicciones, resultados oficiales, evaluaciones y aprendizaje conservador por desempeno historico.
 - Carga local de `.env` para ejecucion privada en escritorio sin exponer secretos en el codigo.
 
 ## Instalacion
@@ -118,9 +120,26 @@ ODDS_API_IO_KEY=
 FOOTBALL_DATA_API_KEY=
 API_FOOTBALL_KEY=
 SPORTS_GAME_ODDS_API_KEY=
+ENABLE_AI_EXTRACTION=true
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+ANTHROPIC_API_KEY=
+ANTHROPIC_MODEL=claude-3-5-sonnet-latest
 ```
 
 Las casas de apuestas pueden usar paginas dinamicas, geobloqueo, sesion o restricciones de terminos. Si una fuente no responde, bloquea o exige clave, la app lo registra en el panel "Estado de fuentes web" y pasa a la siguiente fuente/cache. No se inventan partidos, momios, fechas ni premios.
+
+### Extraccion de quinielas oficiales publicadas como PDF/imagen
+
+Cuando Pronosticos/Loteria Nacional publica la quiniela como guia oficial PDF o imagen, el sistema sigue este orden:
+
+1. Extrae texto del PDF oficial con `pypdf`.
+2. Intenta estructurar casilleros con parser determinista.
+3. Si faltan partidos y `ENABLE_AI_EXTRACTION=true`, usa OpenAI o Claude solo si existe `OPENAI_API_KEY` o `ANTHROPIC_API_KEY`.
+4. La IA debe devolver JSON con `draw_number`, `draw_date` y partidos `id/local/visitante/liga/fecha`.
+5. El resultado se acepta solo si coincide con el numero esperado de partidos del juego y todos tienen local/visitante.
+
+La IA no sustituye fuentes: opera sobre la guia oficial consultada y deja advertencia de validacion visual antes de jugar.
 
 Conectores internos disponibles para mantenimiento tecnico:
 
@@ -142,6 +161,16 @@ La pantalla de Historicos y el modulo `src.backtesting` comparan el desempeno co
 - Aleatorio.
 - Elo.
 - Ensamble.
+
+## Historial y aprendizaje
+
+La app guarda historial privado en `data/prediction_history/`:
+
+- `predictions.jsonl`: predicciones emitidas, boleto optimizado, fuentes y version de modelo.
+- `official_results.jsonl`: resultados oficiales detectados desde Loteria Nacional.
+- `evaluations.jsonl`: comparativa prediccion vs resultado oficial.
+
+La pantalla Historicos muestra accuracy directa, accuracy con cobertura y Brier score. El motor usa ese historial como ajuste conservador solo cuando hay muestra suficiente; si no hay datos, mantiene el modelo base y reporta que no recalibra para evitar sobreajuste.
 
 ## Formato esperado de quiniela Progol
 
