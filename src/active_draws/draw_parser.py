@@ -72,6 +72,7 @@ def parse_home_results(html: str, official_url: str) -> list[dict]:
         if match:
             groups = match.groups()
             if game_id == "protouch":
+                draw["official_results"] = _sequence_results(groups[0])
                 draw["accumulated_pool"] = groups[1]
                 draw["draw_number"] = groups[2]
                 draw["draw_date"] = groups[3]
@@ -80,6 +81,7 @@ def parse_home_results(html: str, official_url: str) -> list[dict]:
                 draw["draw_number"] = groups[2]
                 draw["draw_date"] = groups[3]
             else:
+                draw["official_results"] = _sequence_results(groups[0])
                 draw["draw_number"] = groups[1]
                 draw["draw_date"] = groups[2]
             draw["status"] = "closed" if game_type == "sports_pool" else "Dato no disponible"
@@ -182,3 +184,8 @@ def extract_image_urls(html: str, base_url: str) -> list[str]:
 
 def _clean_snippet(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip(" -:.")
+
+
+def _sequence_results(value: str) -> list[dict[str, str | int]]:
+    letters = re.findall(r"[LEV]", value.upper())
+    return [{"id": idx, "actual_result": letter} for idx, letter in enumerate(letters, start=1)]

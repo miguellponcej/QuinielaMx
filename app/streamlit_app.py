@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import plotly.express as px
@@ -33,6 +34,8 @@ from src.home.home_dashboard import (
     load_active_draws_home_dashboard,
 )
 from src.lottery.random_draw_analysis import RANDOM_DRAW_WARNING
+from src.history.evaluator import evaluate_prediction_run, summarize_model_performance
+from src.history.storage import load_evaluation_history, load_prediction_history, record_prediction_run
 from src.optimization.low_cost_optimizer import optimize_low_cost_ticket
 from src.optimization.monte_carlo import MonteCarloSimulator
 from src.optimization.ticket_optimizer import TicketOptimizer
@@ -232,6 +235,7 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
         budget=budget,
         n_matches=len(quiniela_df),
     )
+    save_prediction_history_once(realtime_result, game_id_from_type(game_type), selected_draw)
     predictions = realtime_result.predictions
     prediction_df = realtime_result.prediction_frame
     if page in {"Dashboard", "Prediccion", "Optimizacion", "Simulacion"}:
@@ -436,9 +440,50 @@ def render_historics(config) -> None:
     """Render historical/backtesting page."""
 
     st.subheader("Historicos y backtesting")
-    st.info(
-        "Modo web-only activo: no se solicitan archivos al usuario. "
-        "El backtesting se activara cuando las fuentes web publiquen historicos estructurados suficientes."
+    performance = summarize_model_performance()
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Predicciones evaluadas", performance["runs"])
+    c2.metric("Partidos comparados", performance["matches"])
+    c3.metric("Accuracy directa", f"{performance['accuracy']:.1%}")
+    c4.metric("Accuracy con cobertura", f"{performance['coverage_accuracy']:.1%}")
+    if performance["brier_score"] is not None:
+        st.metric("Brier score promedio", f"{performance['brier_score']:.4f}")
+
+    predictions = load_prediction_history()
+    evaluations = load_evaluation_history()
+    if predictions:
+        st.write("Predicciones guardadas")
+        st.dataframe(
+            [
+                {
+                    "run_id": item.get("run_id"),
+                    "juego": item.get("game_name"),
+                    "numero": item.get("draw_number"),
+                    "fecha": item.get("draw_date"),
+                    "creada": item.get("created_at"),
+                    "partidos": len(item.get("predictions", [])),
+                    "modelo": item.get("model_version"),
+                }
+                for item in predictions[-50:]
+            ],
+            use_container_width=True,
+            hide_index=True,
+        )
+    else:
+        st.info("Aun no hay predicciones guardadas en el historial privado.")
+    if st.button("Comparar predicciones guardadas contra resultados oficiales"):
+        try:
+            evaluation = evaluate_prediction_run()
+            st.success(f"Evaluacion creada: {evaluation.direct_hits}/{evaluation.total_matches} aciertos directos.")
+            st.dataframe(evaluation.match_rows, use_container_width=True, hide_index=True)
+        except Exception as exc:
+            st.warning(f"No hay comparacion disponible todavia: {exc}")
+    if evaluations:
+        st.write("Evaluaciones historicas")
+        st.dataframe(evaluations[-50:], use_container_width=True, hide_index=True)
+    st.caption(
+        "El aprendizaje del modelo se activa automaticamente cuando existen suficientes concursos comparados "
+        "contra resultados oficiales. No se sobreajusta con muestras pequenas."
     )
 
 
@@ -551,6 +596,18 @@ def render_home(auth: AuthService, user: AuthUser, budget: float = 600.0) -> Non
                 budget=budget,
                 trace=build_web_trace(selected_draw, payload),
             )
+            if result.get("status") == "ok":
+                home_history_result = SimpleNamespace(
+                    game_config=get_game_config(
+                        game_from_label(selected_draw.get("game_name", "Progol")),
+                        n_matches=len(selected_draw.get("matches", [])),
+                    ),
+                    predictions=result["predictions"],
+                    ticket=result["ticket"],
+                    trace=result["trace"],
+                    data_quality_notes=["Prediccion generada desde Home."],
+                )
+                save_prediction_history_once(home_history_result, selected_action["game_id"], selected_draw)
             _render_home_prediction_result(result)
         else:
             st.warning(
@@ -696,6 +753,20 @@ def _render_home_prediction_result(result: dict) -> None:
     t3.metric("Prob. quiniela completa", f"{ticket.probability_all_correct:.4%}")
     st.dataframe(rows, use_container_width=True, hide_index=True)
     st.dataframe(ticket.table, use_container_width=True, hide_index=True)
+
+
+def save_prediction_history_once(realtime_result, game_id: str, draw: dict | None) -> None:
+    """Save one prediction run once per Streamlit session state."""
+
+    draw_key = str((draw or {}).get("draw_number", "sin_numero"))
+    key = f"history_saved_{game_id}_{draw_key}_{realtime_result.trace.generated_at}"
+    if st.session_state.get(key):
+        return
+    try:
+        record_prediction_run(realtime_result, game_id=game_id, draw=draw)
+        st.session_state[key] = True
+    except Exception as exc:
+        st.caption(f"No se pudo guardar historial de prediccion: {exc}")
 
 
 def render_trace_summary(trace) -> None:

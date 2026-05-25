@@ -106,6 +106,7 @@ def parse_guide_text(text: str, game_id: str, game_name: str, official_url: str)
         draw["draw_date"] = _clean(window.group(1))
     matches = parse_casilleros(text, EXPECTED_MATCHES.get(game_id, 0))
     draw["matches"] = matches
+    draw["raw_text_preview"] = normalized[:4000]
     draw["data_freshness"] = "actualizada"
     draw["has_recent_sports_data"] = bool(matches)
     draw["source_warnings"] = [

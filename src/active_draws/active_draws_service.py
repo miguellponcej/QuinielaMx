@@ -17,6 +17,7 @@ from src.active_draws.draw_recommendation_engine import generate_home_recommenda
 from src.active_draws.draw_scheduler import active_draws_refresh_minutes
 from src.active_draws.draw_validator import apply_validation
 from src.active_draws.official_sources_client import OfficialSourcesClient
+from src.history.storage import record_official_results
 
 
 ACTIVE_DRAWS_LOG_DIR = Path("data/active_draws/logs")
@@ -57,8 +58,9 @@ def get_active_draws(
                 used_cache = True
             else:
                 payload = {"saved_at": datetime.now(timezone.utc).isoformat(), "draws": result.draws}
-    draws = [_prepare_draw(draw, used_cache) for draw in payload.get("draws", [])]
-    draws = [draw for draw in draws if _should_show_draw(draw)]
+    prepared_draws = [_prepare_draw(draw, used_cache) for draw in payload.get("draws", [])]
+    _store_official_results(prepared_draws)
+    draws = [draw for draw in prepared_draws if _should_show_draw(draw)]
     probe = []
     if (force_refresh or not used_cache) and hasattr(client, "probe_trusted_sources"):
         probe = client.probe_trusted_sources()
@@ -99,6 +101,25 @@ def _prepare_draw(draw: dict, used_cache: bool) -> dict:
     prepared = apply_validation(prepared)
     prepared["recommendation"] = generate_home_recommendation(prepared)
     return prepared
+
+
+def _store_official_results(draws: list[dict]) -> None:
+    """Persist official past results for later model evaluation."""
+
+    for draw in draws:
+        results = draw.get("official_results") or []
+        if not results or draw.get("draw_number") in (None, "", "Dato no disponible"):
+            continue
+        try:
+            record_official_results(
+                game_id=str(draw.get("game_id")),
+                draw_number=str(draw.get("draw_number")),
+                draw_date=str(draw.get("draw_date", "Dato no disponible")),
+                source_url=str(draw.get("official_url", "Dato no disponible")),
+                results=results,
+            )
+        except Exception:
+            continue
 
 
 def _cache_needs_structured_fixture_refresh(payload: dict) -> bool:

@@ -9,6 +9,7 @@ import pandas as pd
 
 from src.audit.provenance import PredictionTrace
 from src.config.games import GameConfig, GameType, RiskProfile, get_game_config
+from src.history.learning import apply_historical_learning
 from src.optimization.ticket_optimizer import OptimizedTicket, TicketOptimizer
 from src.prediction.predictor import MatchPrediction, QuinielaPredictor
 
@@ -49,6 +50,7 @@ def real_time_prediction_pipeline(
     predictor = QuinielaPredictor(game_type=config.game_type, n_matches=len(frame))
     market_frame = market_probs if market_probs is not None else _market_frame_from_quiniela(frame, config)
     predictions = predictor.predict(frame, market_probs=market_frame, trace=trace)
+    learning_context = apply_historical_learning(predictions, _game_id(config.game_type))
     prediction_frame = predictor.to_dataframe(predictions)
     ticket = None
     if budget is not None:
@@ -59,7 +61,7 @@ def real_time_prediction_pipeline(
         prediction_frame=prediction_frame,
         ticket=ticket,
         trace=trace,
-        data_quality_notes=_quality_notes(frame, trace),
+        data_quality_notes=_quality_notes(frame, trace, learning_context),
     )
 
 
@@ -75,13 +77,25 @@ def _validate_quiniela_frame(frame: pd.DataFrame) -> None:
         raise ValueError("Todos los partidos deben tener equipo local y visitante.")
 
 
-def _quality_notes(frame: pd.DataFrame, trace: PredictionTrace) -> list[str]:
+def _quality_notes(frame: pd.DataFrame, trace: PredictionTrace, learning_context: dict | None = None) -> list[str]:
     notes = [f"Partidos cargados: {len(frame)}."]
     if trace.incomplete_data:
         notes.append("Hay datos incompletos registrados; la confianza debe interpretarse con cautela.")
     if not trace.fresh_data:
         notes.append("No se confirmo frescura completa de datos externos.")
+    if learning_context:
+        notes.append(f"Aprendizaje historico: {learning_context.get('message')} Muestra={learning_context.get('sample_size')}.")
     return notes
+
+
+def _game_id(game_type: GameType) -> str:
+    return {
+        GameType.PROGOL: "progol",
+        GameType.PROGOL_REVANCHA: "progol_revancha",
+        GameType.PROGOL_MEDIA_SEMANA: "progol_media_semana",
+        GameType.PROTOUCH: "protouch",
+        GameType.RANDOM_DRAW: "random_draw",
+    }[game_type]
 
 
 def _market_frame_from_quiniela(frame: pd.DataFrame, config: GameConfig) -> pd.DataFrame | None:

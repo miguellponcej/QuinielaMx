@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
 from src.active_draws.draw_parser import base_draw, parse_home_results, parse_quiniela_page, parse_tulotero_home
+from src.active_draws.ai_quiniela_extractor import extract_draw_with_ai
 from src.active_draws.official_guide_pdf import extract_guide_pdf_urls, fetch_guide_pdf_draw
 from src.data_sources.source_registry import TRUSTED_WEB_SOURCES, WebSource
 
@@ -139,6 +140,7 @@ class OfficialSourcesClient:
             guide_sources = extract_guide_pdf_urls(html, url, game_id)
             _attach_official_reference(draw, guide_sources)
             guide_errors: list[str] = []
+            last_guide_draw = None
             for guide_url in guide_sources:
                 guide_draw, guide_error = fetch_guide_pdf_draw(
                     guide_url,
@@ -146,11 +148,23 @@ class OfficialSourcesClient:
                     game_name,
                     timeout_seconds=self.timeout_seconds,
                 )
+                last_guide_draw = guide_draw or last_guide_draw
                 if guide_error:
                     guide_errors.append(guide_error)
                 if guide_draw and guide_draw.get("matches"):
                     _merge_draw(draw, guide_draw)
                     break
+            if not draw.get("matches"):
+                ai_draw, ai_errors = extract_draw_with_ai(
+                    game_id,
+                    game_name,
+                    [url, *guide_sources, *[item.get("url") for item in draw.get("source_artifacts", []) if item.get("url")]],
+                    context_text=html + "\n\n" + (str(last_guide_draw.get("raw_text_preview", "")) if last_guide_draw else ""),
+                    timeout_seconds=max(30, self.timeout_seconds),
+                )
+                guide_errors.extend(ai_errors)
+                if ai_draw and ai_draw.get("matches"):
+                    _merge_draw(draw, ai_draw)
             if not draw.get("matches"):
                 draw["source_warnings"] = list(
                     dict.fromkeys(
