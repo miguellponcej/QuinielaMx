@@ -1,3 +1,4 @@
+from src.active_draws import ai_quiniela_extractor
 from src.active_draws.ai_quiniela_extractor import _draw_from_ai_payload, _validate_draw, extract_draw_with_ai
 from src.ai.llm_clients import _parse_openai_responses_text
 
@@ -45,9 +46,15 @@ def test_ai_payload_rejects_non_consecutive_casilleros():
     assert not _validate_draw(draw, "progol_media_semana")
 
 
-def test_ai_extraction_requires_configured_provider(monkeypatch):
+def test_ai_extraction_reports_provider_when_ocr_cannot_structure(monkeypatch):
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("ENABLE_LOCAL_OCR", "false")
+    monkeypatch.setattr(
+        ai_quiniela_extractor,
+        "_fetch_binary",
+        lambda url, timeout_seconds: (b"<html>sin quiniela estructurada</html>", "text/html", None),
+    )
 
     draw, errors = extract_draw_with_ai(
         "progol_media_semana",
@@ -57,6 +64,32 @@ def test_ai_extraction_requires_configured_provider(monkeypatch):
 
     assert draw is None
     assert any("OPENAI_API_KEY" in error or "ANTHROPIC_API_KEY" in error for error in errors)
+
+
+def test_ai_extraction_uses_structured_text_before_provider(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    text = "\n".join(
+        [
+            "CONCURSO 797",
+            *[f"CASILLERO {idx}\nLOCAL {idx} VS VISITA {idx}" for idx in range(1, 10)],
+        ]
+    )
+    monkeypatch.setattr(
+        ai_quiniela_extractor,
+        "_fetch_binary",
+        lambda url, timeout_seconds: (text.encode("utf-8"), "text/html", None),
+    )
+
+    draw, errors = extract_draw_with_ai(
+        "progol_media_semana",
+        "Progol Media Semana",
+        ["https://pronosticos.gob.mx/ProgolMediaSemana/Quiniela"],
+    )
+
+    assert draw is not None
+    assert len(draw["matches"]) == 9
+    assert errors
 
 
 def test_parse_openai_responses_text():

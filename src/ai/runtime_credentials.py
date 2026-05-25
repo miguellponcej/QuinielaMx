@@ -100,6 +100,18 @@ def ai_connection_status(session_state: MutableMapping[str, Any] | None = None) 
     }
 
 
+def has_ai_credentials(session_state: MutableMapping[str, Any] | None = None) -> bool:
+    """Return whether any AI credential is configured for extraction."""
+
+    session_state = session_state or {}
+    return bool(
+        session_state.get(OPENAI_KEY_SESSION)
+        or session_state.get(ANTHROPIC_KEY_SESSION)
+        or os.getenv("OPENAI_API_KEY")
+        or os.getenv("ANTHROPIC_API_KEY")
+    )
+
+
 def validate_api_key(provider: str, api_key: str) -> tuple[bool, str]:
     """Validate key shape without making a paid API call."""
 

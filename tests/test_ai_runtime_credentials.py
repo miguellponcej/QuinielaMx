@@ -3,6 +3,7 @@ import os
 from src.ai.runtime_credentials import (
     ai_connection_status,
     clear_ai_credentials,
+    has_ai_credentials,
     mask_key,
     save_ai_credentials,
     validate_api_key,
@@ -49,3 +50,11 @@ def test_connection_status_masks_session_key():
 
     assert status["openai"]["status"] == "Conectado"
     assert status["openai"]["key"] != "sk-proj-abcdef123456"
+
+
+def test_has_ai_credentials_checks_session_and_env(monkeypatch):
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+
+    assert not has_ai_credentials({})
+    assert has_ai_credentials({"runtime_openai_api_key": "sk-proj-test"})

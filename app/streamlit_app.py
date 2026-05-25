@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -27,6 +28,7 @@ from src.ai.runtime_credentials import (
     ai_connection_status,
     apply_session_ai_credentials,
     clear_ai_credentials,
+    has_ai_credentials,
     save_ai_credentials,
 )
 from src.auth.auth_config import AuthConfig
@@ -34,6 +36,7 @@ from src.auth.auth_service import AuthService
 from src.auth.session_manager import AuthUser
 from src.config.games import GameType, OptimizationGoal, RiskProfile, get_game_config
 from src.active_draws.ai_quiniela_extractor import extract_draw_with_ai
+from src.active_draws.local_ocr_extractor import local_ocr_enabled
 from src.home.home_cards import render_draw_card, render_missing_data, render_official_reference
 from src.home.home_dashboard import (
     build_home_view_model,
@@ -224,7 +227,10 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
     with st.sidebar:
         force_web_refresh = st.button("Actualizar fuentes web", key="sidebar_web_refresh")
 
-    payload = load_active_draws_home_dashboard(auth, force_refresh=force_web_refresh)
+    payload = load_active_draws_home_dashboard(
+        auth,
+        force_refresh=force_web_refresh or has_ai_credentials(st.session_state),
+    )
     selected_draw = find_draw_for_game(payload.get("draws", []), game_type)
     recovered_draw = st.session_state.get(f"ai_extracted_{game_id_from_type(game_type)}")
     if selected_draw and recovered_draw and recovered_draw.get("matches") and not selected_draw.get("matches"):
@@ -518,9 +524,9 @@ def render_historics(config) -> None:
 
 
 def render_ai_extraction_panel(config, draw: dict) -> None:
-    """Render explicit AI extraction action when prediction is blocked."""
+    """Render explicit OCR/AI extraction action when prediction is blocked."""
 
-    st.subheader("Extraccion IA de la quiniela")
+    st.subheader("Extraccion OCR/IA de la quiniela")
     sources = list(
         dict.fromkeys(
             [
@@ -531,18 +537,28 @@ def render_ai_extraction_panel(config, draw: dict) -> None:
         )
     )
     status_rows = ai_connection_status(st.session_state)
+    status_items = list(status_rows.values()) + [
+        {
+            "provider": "OCR local gratuito",
+            "status": "Activo" if local_ocr_enabled() else "Desactivado",
+            "model": "Tesseract si esta instalado",
+        }
+    ]
     st.dataframe(
         [
             {"servicio": item["provider"], "estado": item["status"], "modelo": item["model"]}
-            for item in status_rows.values()
+            for item in status_items
         ],
         use_container_width=True,
         hide_index=True,
     )
-    st.caption("La extraccion IA usa las referencias registradas y desbloquea prediccion solo si obtiene todos los partidos validos.")
-    if st.button("Intentar extraer partidos con IA ahora"):
+    st.caption(
+        "La extraccion usa primero OCR local gratuito y despues API de IA si esta configurada. "
+        "Solo desbloquea prediccion si obtiene todos los partidos validos."
+    )
+    if st.button("Intentar extraer partidos con OCR/IA ahora"):
         apply_session_ai_credentials(st.session_state)
-        with st.spinner("Leyendo referencias oficiales/secundarias con IA..."):
+        with st.spinner("Leyendo referencias oficiales/secundarias con OCR local e IA opcional..."):
             extracted_draw, errors = extract_draw_with_ai(
                 str(draw.get("game_id")),
                 str(draw.get("game_name", config.name)),
@@ -550,15 +566,15 @@ def render_ai_extraction_panel(config, draw: dict) -> None:
                 context_text="Extraccion solicitada manualmente desde la pantalla de prediccion.",
             )
         if extracted_draw and extracted_draw.get("matches"):
-            st.success(f"IA extrajo {len(extracted_draw['matches'])} partidos. Valida visualmente y actualiza fuentes para guardar el resultado.")
+            st.success(f"Se extrajeron {len(extracted_draw['matches'])} partidos. Valida visualmente y actualiza fuentes para guardar el resultado.")
             st.dataframe(extracted_draw["matches"], use_container_width=True, hide_index=True)
             st.session_state[f"ai_extracted_{draw.get('game_id')}"] = extracted_draw
             st.info("Se usaran estos partidos para generar prediccion en esta sesion.")
             st.rerun()
         else:
-            st.error("La IA no logro estructurar una quiniela completa y validada.")
+            st.error("No se logro estructurar una quiniela completa y validada.")
         if errors:
-            with st.expander("Diagnostico de extraccion IA", expanded=True):
+            with st.expander("Diagnostico de extraccion OCR/IA", expanded=True):
                 for error in errors:
                     st.write(f"- {error}")
 
@@ -568,9 +584,24 @@ def render_ai_connections(user: AuthUser) -> None:
 
     st.subheader("Conexiones IA")
     st.info(
-        "Conecta tus API keys de OpenAI y Claude para que la app pueda leer guias oficiales en PDF/imagen "
-        "cuando las fuentes no entreguen partidos estructurados. No ingreses contrasenas de tus cuentas; usa API keys."
+        "La app intenta leer guias oficiales con OCR local gratuito. Si la imagen es compleja, puedes conectar "
+        "API keys de OpenAI o Claude para complementar la extraccion. No ingreses contrasenas de tus cuentas."
     )
+    link_col1, link_col2, link_col3 = st.columns(3)
+    link_col1.link_button("Abrir ChatGPT", "https://chatgpt.com/")
+    link_col2.link_button("Abrir Claude", "https://claude.ai/")
+    link_col3.link_button("Crear OpenAI key", "https://platform.openai.com/api-keys")
+    st.link_button("Crear Claude key", "https://console.anthropic.com/settings/keys")
+    st.caption(
+        "Puedes usar tus chats normales fuera de la app para revisar ideas, pero la app no puede operar esos chats "
+        "como motor automatico. Para automatizacion confiable usa API keys."
+    )
+    enable_ocr = st.toggle(
+        "Usar OCR local gratuito antes de IA",
+        value=local_ocr_enabled(),
+        help="Requiere Tesseract instalado en el servidor. En Streamlit Cloud se instala con packages.txt.",
+    )
+    os.environ["ENABLE_LOCAL_OCR"] = "true" if enable_ocr else "false"
     enable_ai = st.toggle(
         "Usar IA para extraer quinielas oficiales cuando el parser no alcance",
         value=str(st.session_state.get("runtime_enable_ai_extraction", "true")).lower() not in {"false", "0", "no"},
@@ -818,7 +849,8 @@ def _friendly_source_notes(draw: dict) -> str:
 def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> dict:
     """Load Home payload with visible progress feedback."""
 
-    if not force_refresh:
+    auto_ai_refresh = has_ai_credentials(st.session_state)
+    if not force_refresh and not auto_ai_refresh:
         with st.spinner("Cargando sorteos vigentes y recomendaciones..."):
             return load_active_draws_home_dashboard(auth, force_refresh=False)
 
@@ -826,7 +858,10 @@ def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> d
     progress_bar = st.progress(0)
     progress_text.write("Validando sesion privada...")
     progress_bar.progress(15)
-    progress_text.write("Consultando fuentes oficiales, cache y fuentes deportivas estructuradas...")
+    if auto_ai_refresh:
+        progress_text.write("Consultando fuentes y ejecutando extraccion IA automatica si hace falta...")
+    else:
+        progress_text.write("Consultando fuentes oficiales, cache y fuentes deportivas estructuradas...")
     progress_bar.progress(35)
     payload = load_active_draws_home_dashboard(auth, force_refresh=True)
     progress_text.write("Validando frescura, datos faltantes y partidos estructurados...")

@@ -176,3 +176,37 @@ def test_generic_espn_fixtures_are_not_actionable_for_official_pool():
     assert payload["draws"][0]["candidate_matches"]
     assert "Partidos descartados" in payload["draws"][0]["source_errors"][0]
     assert payload["draws"][0]["recommendation"]["recommendation"] != "Recomendado"
+
+
+def test_ai_credentials_refresh_partial_cache(monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-proj-test")
+    cached_ready = base_draw("progol", "Progol", "sports_pool", "https://official/progol", "cache", status="active")
+    cached_ready["matches"] = [{"id": idx, "local": "A", "visitante": "B", "liga": "Liga", "fecha": "2099-01-01"} for idx in range(1, 15)]
+    cached_missing = base_draw(
+        "progol_media_semana",
+        "Progol Media Semana",
+        "sports_pool",
+        "https://official/media",
+        "cache",
+        status="active",
+    )
+    save_active_draws_cache([cached_ready, cached_missing])
+    refreshed = base_draw(
+        "progol_media_semana",
+        "Progol Media Semana",
+        "sports_pool",
+        "https://official/media",
+        "oficial_ia_openai",
+        status="active",
+    )
+    refreshed["matches"] = [
+        {"id": idx, "local": f"L{idx}", "visitante": f"V{idx}", "liga": "Liga", "fecha": "2099-01-01"}
+        for idx in range(1, 10)
+    ]
+    result = FetchResult(ok=True, draws=[refreshed], errors=[], sources=["https://official/media"])
+
+    payload = get_active_draws(force_refresh=False, client=FakeClient(result), user_email="test@example.com")
+
+    assert not payload["used_cache"]
+    assert payload["draws"][0]["game_name"] == "Progol Media Semana"
+    assert len(payload["draws"][0]["matches"]) == 9

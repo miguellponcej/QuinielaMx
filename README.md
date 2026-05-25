@@ -20,7 +20,7 @@ Este proyecto no garantiza premios ni resultados. Los juegos deportivos tienen i
 - Interfaz Streamlit con dashboard, prediccion, optimizacion, simulacion e historicos.
 - Home privado con consulta de sorteos/quinielas vigentes, cache, logs y recomendaciones automaticas por juego.
 - Pipeline auditado `real_time_prediction_pipeline()` para que los flujos de app generen predicciones solo con trazabilidad de fuentes.
-- Extraccion automatica de guias oficiales en PDF/imagen: primero parser determinista y, si hace falta, IA opcional con OpenAI/Claude.
+- Extraccion automatica de guias oficiales en PDF/imagen: primero parser determinista, luego OCR local gratuito y, si hace falta, IA opcional con OpenAI/Claude.
 - Historial privado de predicciones, resultados oficiales, evaluaciones y aprendizaje conservador por desempeno historico.
 - Carga local de `.env` para ejecucion privada en escritorio sin exponer secretos en el codigo.
 
@@ -121,6 +121,8 @@ FOOTBALL_DATA_API_KEY=
 API_FOOTBALL_KEY=
 SPORTS_GAME_ODDS_API_KEY=
 ENABLE_AI_EXTRACTION=true
+ENABLE_LOCAL_OCR=true
+LOCAL_OCR_LANG=spa+eng
 OPENAI_API_KEY=
 OPENAI_MODEL=gpt-4o-mini
 ANTHROPIC_API_KEY=
@@ -135,16 +137,20 @@ Cuando Pronosticos/Loteria Nacional publica la quiniela como guia oficial PDF o 
 
 1. Extrae texto del PDF oficial con `pypdf`.
 2. Intenta estructurar casilleros con parser determinista.
-3. Si faltan partidos y `ENABLE_AI_EXTRACTION=true`, usa OpenAI o Claude solo si existe `OPENAI_API_KEY` o `ANTHROPIC_API_KEY`.
-4. La IA debe devolver JSON con `draw_number`, `draw_date` y partidos `id/local/visitante/liga/fecha`.
-5. El resultado se acepta solo si coincide con el numero esperado de partidos del juego y todos tienen local/visitante.
+3. Si la guia esta como imagen, intenta OCR local gratuito con Tesseract cuando `ENABLE_LOCAL_OCR=true`.
+4. Si el OCR no puede separar equipos con confianza y `ENABLE_AI_EXTRACTION=true`, usa OpenAI o Claude solo si existe `OPENAI_API_KEY` o `ANTHROPIC_API_KEY`.
+5. La IA debe devolver JSON con `draw_number`, `draw_date` y partidos `id/local/visitante/liga/fecha`.
+6. El resultado se acepta solo si coincide con el numero esperado de partidos del juego y todos tienen local/visitante.
 
 La IA no sustituye fuentes: opera sobre la guia oficial consultada y deja advertencia de validacion visual antes de jugar.
 
+En Streamlit Community Cloud, `packages.txt` instala `tesseract-ocr` y `tesseract-ocr-spa` para habilitar OCR gratuito. Si Tesseract no esta disponible en el servidor, la app lo registra en diagnostico y continua con parser/IA opcional sin inventar datos.
+
 ### Conexiones IA dentro de la app
 
-La pantalla privada `IA` permite conectar OpenAI y Claude por separado usando API keys:
+La pantalla privada `IA` permite activar OCR local gratuito y conectar OpenAI/Claude por separado usando API keys:
 
+- OCR local: no requiere API key, pero requiere Tesseract instalado en el servidor.
 - OpenAI: pega una key con formato `sk-` o `sk-proj-`.
 - Claude/Anthropic: pega una key con formato `sk-ant-`.
 - Las claves se capturan como campo de contrasena y se aplican a la sesion privada.

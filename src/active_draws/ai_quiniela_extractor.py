@@ -13,6 +13,7 @@ import urllib.request
 from typing import Any
 
 from src.active_draws.draw_parser import base_draw
+from src.active_draws.local_ocr_extractor import extract_text_from_image_payloads, parse_ocr_text_to_draw
 from src.active_draws.official_guide_pdf import EXPECTED_MATCHES, extract_pdf_text, parse_guide_text
 from src.ai.llm_clients import (
     anthropic_available,
@@ -47,12 +48,9 @@ def extract_draw_with_ai(
     allowed_urls = [url for url in source_urls if _is_allowed_reference_url(url)]
     if not allowed_urls:
         return None, ["Extraccion IA omitida: no hay URL oficial/secundaria permitida."]
-    if not openai_available() and not anthropic_available():
-        return None, ["Extraccion IA omitida: configura OPENAI_API_KEY o ANTHROPIC_API_KEY."]
-
     text_chunks = [context_text]
     images: list[dict[str, str]] = []
-    errors.append(f"Extraccion IA iniciada con {len(allowed_urls)} referencia(s) permitida(s).")
+    errors.append(f"Extraccion automatica iniciada con {len(allowed_urls)} referencia(s) permitida(s).")
     for url in allowed_urls[:6]:
         content, mime_type, error = _fetch_binary(url, timeout_seconds=timeout_seconds)
         if error:
@@ -72,9 +70,35 @@ def extract_draw_with_ai(
             images.extend(_pdf_pages_as_images(content, max_pages=2))
         elif mime_type.startswith("image/"):
             images.append(_image_payload(content, mime_type))
-    errors.append(f"Extraccion IA preparo {len(images)} imagen(es) y {sum(len(chunk) for chunk in text_chunks)} caracteres de texto.")
+    combined_text = "\n\n".join(chunk for chunk in text_chunks if chunk)
+    errors.append(f"Extraccion automatica preparo {len(images)} imagen(es) y {len(combined_text)} caracteres de texto.")
 
-    prompt = _build_prompt(game_id, game_name, "\n\n".join(chunk for chunk in text_chunks if chunk), allowed_urls)
+    text_draw = _try_text_parse_draw(combined_text, game_id, game_name, allowed_urls[0])
+    if text_draw:
+        text_draw["source_warnings"] = list(
+            dict.fromkeys([*(text_draw.get("source_warnings") or []), *errors])
+        )
+        return text_draw, errors
+
+    ocr_text, ocr_errors = extract_text_from_image_payloads(images)
+    errors.extend(ocr_errors)
+    if ocr_text:
+        ocr_draw = parse_ocr_text_to_draw(ocr_text, game_id, game_name, allowed_urls[0])
+        if ocr_draw and _validate_draw(ocr_draw, game_id):
+            ocr_draw["raw_text_preview"] = ocr_text[:4000]
+            ocr_draw["source_warnings"] = list(
+                dict.fromkeys([*(ocr_draw.get("source_warnings") or []), *errors])
+            )
+            return ocr_draw, errors
+        combined_text = f"{combined_text}\n\nTexto OCR local:\n{ocr_text}"
+
+    if not openai_available() and not anthropic_available():
+        errors.append(
+            "Extraccion IA por API omitida: configura OPENAI_API_KEY o ANTHROPIC_API_KEY para interpretar imagenes complejas."
+        )
+        return None, errors
+
+    prompt = _build_prompt(game_id, game_name, combined_text, allowed_urls)
     responses = []
     if openai_available():
         responses.append(call_openai_json(prompt, images=images, timeout_seconds=timeout_seconds))
@@ -96,6 +120,18 @@ def extract_draw_with_ai(
             return draw, errors
         errors.append(f"{response.provider}: respuesta IA sin partidos validos o conteo incorrecto.")
     return None, errors
+
+
+def _try_text_parse_draw(text: str, game_id: str, game_name: str, official_url: str) -> dict | None:
+    """Try deterministic text parsing before calling external AI providers."""
+
+    if not text.strip():
+        return None
+    draw = parse_guide_text(text, game_id, game_name, official_url)
+    if _validate_draw(draw, game_id):
+        draw["raw_source"] = "texto_oficial_estructurado"
+        return draw
+    return None
 
 
 def _build_prompt(game_id: str, game_name: str, context_text: str, source_urls: list[str]) -> str:

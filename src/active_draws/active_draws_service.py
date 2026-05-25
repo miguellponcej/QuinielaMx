@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
@@ -132,7 +133,15 @@ def _cache_needs_structured_fixture_refresh(payload: dict) -> bool:
         return True
     if all(not draw.get("matches") for draw in sports_draws):
         return True
+    if _ai_extraction_configured() and any(not draw.get("matches") for draw in sports_draws):
+        return True
     return any(_is_stale_sports_draw(draw) for draw in sports_draws)
+
+
+def _ai_extraction_configured() -> bool:
+    enabled = os.getenv("ENABLE_AI_EXTRACTION", "true").lower() in {"1", "true", "yes", "si"}
+    local_ocr_enabled = os.getenv("ENABLE_LOCAL_OCR", "true").lower() in {"1", "true", "yes", "si"}
+    return enabled and (local_ocr_enabled or bool(os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")))
 
 
 def _should_show_draw(draw: dict) -> bool:
