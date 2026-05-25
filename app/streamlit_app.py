@@ -23,6 +23,12 @@ except Exception:
     pass
 
 from src.audit.provenance import MODEL_VERSION, build_manual_trace
+from src.ai.runtime_credentials import (
+    ai_connection_status,
+    apply_session_ai_credentials,
+    clear_ai_credentials,
+    save_ai_credentials,
+)
 from src.auth.auth_config import AuthConfig
 from src.auth.auth_service import AuthService
 from src.auth.session_manager import AuthUser
@@ -181,6 +187,7 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
     """Render the private application after successful auth."""
 
     render_header(auth, user)
+    apply_session_ai_credentials(st.session_state)
     st.title("QuinielaPredictor MX")
     st.caption(
         "Prediccion probabilistica, optimizacion de cobertura y simulacion. "
@@ -197,8 +204,12 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
         scenarios = st.number_input("Escenarios Monte Carlo", min_value=1000, max_value=200000, value=100000, step=1000)
         page = st.radio(
             "Pantalla",
-            ["Home", "Dashboard", "Prediccion", "Optimizacion", "Simulacion", "Historicos", "Configuracion"],
+            ["Home", "Dashboard", "Prediccion", "Optimizacion", "Simulacion", "Historicos", "IA", "Configuracion"],
         )
+
+    if page == "IA":
+        render_ai_connections(user)
+        return
 
     if page == "Home":
         render_home(auth, user, budget=budget)
@@ -484,6 +495,73 @@ def render_historics(config) -> None:
     st.caption(
         "El aprendizaje del modelo se activa automaticamente cuando existen suficientes concursos comparados "
         "contra resultados oficiales. No se sobreajusta con muestras pequenas."
+    )
+
+
+def render_ai_connections(user: AuthUser) -> None:
+    """Render private AI connection screen."""
+
+    st.subheader("Conexiones IA")
+    st.info(
+        "Conecta tus API keys de OpenAI y Claude para que la app pueda leer guias oficiales en PDF/imagen "
+        "cuando las fuentes no entreguen partidos estructurados. No ingreses contrasenas de tus cuentas; usa API keys."
+    )
+    enable_ai = st.toggle(
+        "Usar IA para extraer quinielas oficiales cuando el parser no alcance",
+        value=str(st.session_state.get("runtime_enable_ai_extraction", "true")).lower() not in {"false", "0", "no"},
+    )
+    st.session_state["runtime_enable_ai_extraction"] = enable_ai
+    apply_session_ai_credentials(st.session_state)
+
+    status = ai_connection_status(st.session_state)
+    st.dataframe(
+        [
+            {
+                "servicio": item["provider"],
+                "estado": item["status"],
+                "api_key": item["key"],
+                "modelo": item["model"],
+            }
+            for item in status.values()
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
+    openai_col, claude_col = st.columns(2)
+    with openai_col:
+        st.markdown("### ChatGPT / OpenAI")
+        with st.form("openai_connection_form"):
+            openai_key = st.text_input("OpenAI API key", type="password", placeholder="sk-...")
+            openai_model = st.text_input("Modelo OpenAI", value=status["openai"]["model"])
+            submitted = st.form_submit_button("Activar OpenAI")
+        if submitted:
+            ok, message = save_ai_credentials(st.session_state, "openai", openai_key, openai_model)
+            security_log(user.email, "ai_credentials_update", "openai_connected" if ok else "openai_rejected")
+            st.success(message) if ok else st.error(message)
+        if st.button("Desconectar OpenAI"):
+            clear_ai_credentials(st.session_state, "openai")
+            security_log(user.email, "ai_credentials_update", "openai_cleared")
+            st.success("OpenAI desconectado de esta sesion.")
+
+    with claude_col:
+        st.markdown("### Claude / Anthropic")
+        with st.form("anthropic_connection_form"):
+            anthropic_key = st.text_input("Anthropic API key", type="password", placeholder="sk-ant-...")
+            anthropic_model = st.text_input("Modelo Claude", value=status["anthropic"]["model"])
+            submitted = st.form_submit_button("Activar Claude")
+        if submitted:
+            ok, message = save_ai_credentials(st.session_state, "anthropic", anthropic_key, anthropic_model)
+            security_log(user.email, "ai_credentials_update", "anthropic_connected" if ok else "anthropic_rejected")
+            st.success(message) if ok else st.error(message)
+        if st.button("Desconectar Claude"):
+            clear_ai_credentials(st.session_state, "anthropic")
+            security_log(user.email, "ai_credentials_update", "anthropic_cleared")
+            st.success("Claude desconectado de esta sesion.")
+
+    st.caption(
+        "Las claves capturadas aqui viven en la sesion privada de Streamlit y se aplican al entorno de ejecucion. "
+        "Para persistencia en Streamlit Cloud, configuralas en Secrets."
     )
 
 

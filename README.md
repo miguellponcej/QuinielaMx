@@ -141,6 +141,16 @@ Cuando Pronosticos/Loteria Nacional publica la quiniela como guia oficial PDF o 
 
 La IA no sustituye fuentes: opera sobre la guia oficial consultada y deja advertencia de validacion visual antes de jugar.
 
+### Conexiones IA dentro de la app
+
+La pantalla privada `IA` permite conectar OpenAI y Claude por separado usando API keys:
+
+- OpenAI: pega una key con formato `sk-` o `sk-proj-`.
+- Claude/Anthropic: pega una key con formato `sk-ant-`.
+- Las claves se capturan como campo de contrasena y se aplican a la sesion privada.
+- No se deben ingresar contrasenas de ChatGPT ni Claude; la app usa API keys.
+- Para persistencia en Streamlit Cloud, configura las mismas variables en Secrets.
+
 Conectores internos disponibles para mantenimiento tecnico:
 
 - Resultados historicos de futbol soccer.
