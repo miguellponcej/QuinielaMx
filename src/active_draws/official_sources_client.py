@@ -8,6 +8,7 @@ import os
 import http.client
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from collections.abc import Callable
 
 from src.active_draws.draw_parser import base_draw, parse_home_results, parse_quiniela_page, parse_tulotero_home
 from src.active_draws.official_guide_pdf import extract_guide_pdf_urls, fetch_guide_pdf_draw
@@ -45,8 +46,13 @@ class FetchResult:
 class OfficialSourcesClient:
     """Fetch official public pages with timeouts and safe fallbacks."""
 
-    def __init__(self, timeout_seconds: int = 8) -> None:
+    def __init__(self, timeout_seconds: int = 8, progress_callback: Callable[[str, int | None], None] | None = None) -> None:
         self.timeout_seconds = timeout_seconds
+        self.progress_callback = progress_callback
+
+    def _emit(self, message: str, progress: int | None = None) -> None:
+        if self.progress_callback:
+            self.progress_callback(message, progress)
 
     def fetch_official_active_draws(self) -> FetchResult:
         """Fetch all configured official active draw sources."""
@@ -62,6 +68,21 @@ class OfficialSourcesClient:
             self.fetch_active_progol_media_semana,
             self.fetch_active_protouch,
         ]
+        if self.progress_callback:
+            total = len(fetchers)
+            for index, fetcher in enumerate(fetchers, start=1):
+                name = fetcher.__name__.replace("fetch_active_", "").replace("_", " ")
+                self._emit(f"Consultando {name} ({index}/{total})...", 20 + int(index / total * 45))
+                try:
+                    result = fetcher()
+                except Exception as exc:
+                    result = FetchResult(ok=False, draws=[], errors=[f"Error inesperado consultando {name}: {exc}"], sources=[])
+                draws.extend(result.draws)
+                errors.extend(result.errors)
+                sources.extend(result.sources)
+            self._emit("Unificando juegos encontrados y eliminando duplicados...", 68)
+            deduped = _dedupe_draws(draws)
+            return FetchResult(ok=bool(deduped) and len(errors) < len(sources or [1]), draws=deduped, errors=errors, sources=sources)
         with ThreadPoolExecutor(max_workers=len(fetchers)) as executor:
             for future in as_completed([executor.submit(fetcher) for fetcher in fetchers]):
                 try:
@@ -136,18 +157,23 @@ class OfficialSourcesClient:
         return FetchResult(ok=True, draws=parse_tulotero_home(html, url), errors=[], sources=[url])
 
     def _fetch_sports_pool(self, game_id: str, game_name: str, url: str) -> FetchResult:
+        self._emit(f"{game_name}: abriendo pagina oficial...", None)
         html, error = self._fetch_url(url)
         if error:
+            self._emit(f"{game_name}: la fuente oficial no respondio; se registrara diagnostico.", None)
             draw = base_draw(game_id, game_name, "sports_pool", url, "oficial_quiniela")
             draw["source_errors"].append(error)
             return FetchResult(ok=False, draws=[draw], errors=[error], sources=[url])
+        self._emit(f"{game_name}: pagina oficial recibida; buscando partidos estructurados...", None)
         draw = parse_quiniela_page(html, game_id, game_name, url)
         if not draw.get("matches"):
+            self._emit(f"{game_name}: buscando guia oficial PDF/imagen...", None)
             guide_sources = extract_guide_pdf_urls(html, url, game_id)
             _attach_official_reference(draw, guide_sources)
             guide_errors: list[str] = []
             last_guide_draw = None
             for guide_url in guide_sources:
+                self._emit(f"{game_name}: leyendo guia oficial PDF...", None)
                 guide_draw, guide_error = fetch_guide_pdf_draw(
                     guide_url,
                     game_id,
@@ -161,32 +187,38 @@ class OfficialSourcesClient:
                     _merge_draw(draw, guide_draw)
                     break
             if not draw.get("matches"):
+                self._emit(f"{game_name}: intentando extraccion automatica OCR/IA sobre fuente oficial...", None)
                 ai_draw, ai_errors = extract_draw_with_ai(
                     game_id,
                     game_name,
                     [url, *guide_sources, *[item.get("url") for item in draw.get("source_artifacts", []) if item.get("url")]],
                     context_text=html + "\n\n" + (str(last_guide_draw.get("raw_text_preview", "")) if last_guide_draw else ""),
                     timeout_seconds=max(30, self.timeout_seconds),
+                    progress_callback=self.progress_callback,
                 )
                 guide_errors.extend(ai_errors)
                 if ai_draw and ai_draw.get("matches"):
                     _merge_draw(draw, ai_draw)
             if not draw.get("matches"):
+                self._emit(f"{game_name}: consultando fuente secundaria autorizada...", None)
                 secondary_draw, secondary_errors, secondary_sources = self._fetch_secondary_program_reference(game_id, game_name)
                 guide_errors.extend(secondary_errors)
                 if secondary_draw:
                     _merge_draw(draw, secondary_draw)
+                    self._emit(f"{game_name}: intentando OCR/IA sobre fuente secundaria...", None)
                     secondary_ai_draw, secondary_ai_errors = extract_draw_with_ai(
                         game_id,
                         game_name,
                         secondary_sources,
                         context_text="Fuente secundaria especializada Progol.es. Extrae solo programa/momios vigente.",
                         timeout_seconds=max(30, self.timeout_seconds),
+                        progress_callback=self.progress_callback,
                     )
                     guide_errors.extend(secondary_ai_errors)
                     if secondary_ai_draw and secondary_ai_draw.get("matches"):
                         _merge_draw(draw, secondary_ai_draw)
             if not draw.get("matches"):
+                self._emit(f"{game_name}: no se obtuvo quiniela completa validada.", None)
                 draw["source_warnings"] = list(
                     dict.fromkeys(
                         [
@@ -202,6 +234,8 @@ class OfficialSourcesClient:
             sources = [url, *guide_sources]
         else:
             sources = [url]
+        if draw.get("matches"):
+            self._emit(f"{game_name}: partidos estructurados listos ({len(draw.get('matches', []))}).", None)
         draw["alternate_sources"] = list(dict.fromkeys([*(draw.get("alternate_sources") or []), *sources]))
         return FetchResult(ok=bool(draw.get("matches")), draws=[draw], errors=[], sources=sources)
 

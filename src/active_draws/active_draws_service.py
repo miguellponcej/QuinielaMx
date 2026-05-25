@@ -7,6 +7,7 @@ import os
 import time
 from datetime import datetime, time as datetime_time, timezone
 from pathlib import Path
+from collections.abc import Callable
 
 from src.active_draws.draw_cache import (
     cache_age_hours,
@@ -28,6 +29,7 @@ def get_active_draws(
     force_refresh: bool = False,
     client: OfficialSourcesClient | None = None,
     user_email: str = "unknown",
+    progress_callback: Callable[[str, int | None], None] | None = None,
 ) -> dict:
     """Get active draws from web or cache and attach recommendations."""
 
@@ -38,33 +40,43 @@ def get_active_draws(
     errors: list[str] = []
     sources: list[str] = []
     payload = None
+    _emit(progress_callback, "Validando cache local de sorteos vigentes...", 10)
     if not force_refresh and is_cache_fresh(refresh_minutes):
+        _emit(progress_callback, "Cache vigente encontrado; cargando copia local...", 16)
         payload = load_active_draws_cache()
         used_cache = True
         if payload and _cache_needs_structured_fixture_refresh(payload):
+            _emit(progress_callback, "Cache incompleto para quinielas; se consultaran fuentes web.", 18)
             payload = None
             used_cache = False
     if payload is None:
+        _emit(progress_callback, "Consultando fuentes oficiales/configuradas...", 20)
         result = client.fetch_official_active_draws()
         errors.extend(result.errors)
         sources.extend(result.sources)
         if result.draws:
             if result.ok:
+                _emit(progress_callback, "Consulta web exitosa; actualizando cache local...", 72)
                 save_active_draws_cache(result.draws)
             payload = {"saved_at": datetime.now(timezone.utc).isoformat(), "draws": result.draws}
         else:
+            _emit(progress_callback, "La web no entrego datos utiles; buscando cache local de respaldo...", 72)
             cached = load_active_draws_cache()
             if cached:
                 payload = cached
                 used_cache = True
             else:
                 payload = {"saved_at": datetime.now(timezone.utc).isoformat(), "draws": result.draws}
+    _emit(progress_callback, "Validando frescura, faltantes y calidad de datos...", 78)
     prepared_draws = [_prepare_draw(draw, used_cache) for draw in payload.get("draws", [])]
+    _emit(progress_callback, "Guardando resultados oficiales detectados para historial...", 84)
     _store_official_results(prepared_draws)
     draws = [draw for draw in prepared_draws if _should_show_draw(draw)]
     probe = []
     if (force_refresh or not used_cache) and hasattr(client, "probe_trusted_sources"):
+        _emit(progress_callback, "Diagnosticando conectividad de fuentes externas...", 88)
         probe = client.probe_trusted_sources()
+    _emit(progress_callback, "Construyendo resumen ejecutivo de Home...", 94)
     response = {
         "updated_at": payload.get("saved_at"),
         "used_cache": used_cache,
@@ -77,7 +89,13 @@ def get_active_draws(
         "response_seconds": round(time.perf_counter() - started, 3),
     }
     log_active_draws_update(response, user_email)
+    _emit(progress_callback, "Actualizacion terminada.", 100)
     return response
+
+
+def _emit(callback: Callable[[str, int | None], None] | None, message: str, progress: int | None = None) -> None:
+    if callback:
+        callback(message, progress)
 
 
 def _prepare_draw(draw: dict, used_cache: bool) -> dict:

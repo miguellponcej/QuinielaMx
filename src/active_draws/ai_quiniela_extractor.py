@@ -11,6 +11,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any
+from collections.abc import Callable
 
 from src.active_draws.draw_parser import base_draw
 from src.active_draws.local_ocr_extractor import extract_text_from_image_payloads, parse_ocr_text_to_draw
@@ -39,10 +40,12 @@ def extract_draw_with_ai(
     source_urls: list[str],
     context_text: str = "",
     timeout_seconds: int = 45,
+    progress_callback: Callable[[str, int | None], None] | None = None,
 ) -> tuple[dict | None, list[str]]:
     """Use configured AI providers to structure official quiniela references."""
 
     errors: list[str] = []
+    _emit(progress_callback, f"{game_name}: preparando extraccion automatica de quiniela...", None)
     if not ai_extraction_enabled():
         return None, ["Extraccion IA desactivada por ENABLE_AI_EXTRACTION."]
     allowed_urls = [url for url in source_urls if _is_allowed_reference_url(url)]
@@ -51,7 +54,8 @@ def extract_draw_with_ai(
     text_chunks = [context_text]
     images: list[dict[str, str]] = []
     errors.append(f"Extraccion automatica iniciada con {len(allowed_urls)} referencia(s) permitida(s).")
-    for url in allowed_urls[:6]:
+    for index, url in enumerate(allowed_urls[:6], start=1):
+        _emit(progress_callback, f"{game_name}: descargando referencia {index}/{min(len(allowed_urls), 6)}...", None)
         content, mime_type, error = _fetch_binary(url, timeout_seconds=timeout_seconds)
         if error:
             errors.append(error)
@@ -62,11 +66,13 @@ def extract_draw_with_ai(
             except Exception:
                 pass
         if mime_type == "application/pdf" or url.lower().split("?")[0].endswith(".pdf"):
+            _emit(progress_callback, f"{game_name}: extrayendo texto del PDF oficial...", None)
             extracted_text, pdf_error = extract_pdf_text(content)
             if extracted_text:
                 text_chunks.append(extracted_text[:12000])
             if pdf_error:
                 errors.append(pdf_error)
+            _emit(progress_callback, f"{game_name}: convirtiendo paginas PDF a imagen para OCR/vision...", None)
             images.extend(_pdf_pages_as_images(content, max_pages=2))
         elif mime_type.startswith("image/"):
             images.append(_image_payload(content, mime_type))
@@ -75,16 +81,20 @@ def extract_draw_with_ai(
 
     text_draw = _try_text_parse_draw(combined_text, game_id, game_name, allowed_urls[0])
     if text_draw:
+        _emit(progress_callback, f"{game_name}: partidos estructurados desde texto oficial.", None)
         text_draw["source_warnings"] = list(
             dict.fromkeys([*(text_draw.get("source_warnings") or []), *errors])
         )
         return text_draw, errors
 
+    _emit(progress_callback, f"{game_name}: iniciando OCR local gratuito...", None)
     ocr_text, ocr_errors = extract_text_from_image_payloads(images)
     errors.extend(ocr_errors)
     if ocr_text:
+        _emit(progress_callback, f"{game_name}: validando texto OCR contra casilleros esperados...", None)
         ocr_draw = parse_ocr_text_to_draw(ocr_text, game_id, game_name, allowed_urls[0])
         if ocr_draw and _validate_draw(ocr_draw, game_id):
+            _emit(progress_callback, f"{game_name}: OCR local obtuvo quiniela completa.", None)
             ocr_draw["raw_text_preview"] = ocr_text[:4000]
             ocr_draw["source_warnings"] = list(
                 dict.fromkeys([*(ocr_draw.get("source_warnings") or []), *errors])
@@ -93,6 +103,7 @@ def extract_draw_with_ai(
         combined_text = f"{combined_text}\n\nTexto OCR local:\n{ocr_text}"
 
     if not openai_available() and not anthropic_available():
+        _emit(progress_callback, f"{game_name}: OCR no alcanzo y no hay API IA configurada.", None)
         errors.append(
             "Extraccion IA por API omitida: configura OPENAI_API_KEY o ANTHROPIC_API_KEY para interpretar imagenes complejas."
         )
@@ -101,8 +112,10 @@ def extract_draw_with_ai(
     prompt = _build_prompt(game_id, game_name, combined_text, allowed_urls)
     responses = []
     if openai_available():
+        _emit(progress_callback, f"{game_name}: consultando OpenAI para estructurar la guia...", None)
         responses.append(call_openai_json(prompt, images=images, timeout_seconds=timeout_seconds))
     if anthropic_available():
+        _emit(progress_callback, f"{game_name}: consultando Claude para estructurar la guia...", None)
         responses.append(call_anthropic_json(prompt, images=images, timeout_seconds=timeout_seconds))
     for response in responses:
         if not response.ok:
@@ -114,12 +127,19 @@ def extract_draw_with_ai(
             continue
         draw = _draw_from_ai_payload(parsed, game_id, game_name, allowed_urls[0], response.provider)
         if _validate_draw(draw, game_id):
+            _emit(progress_callback, f"{game_name}: IA valido una quiniela completa.", None)
             draw["source_warnings"] = list(
                 dict.fromkeys([*(draw.get("source_warnings") or []), *errors])
             )
             return draw, errors
         errors.append(f"{response.provider}: respuesta IA sin partidos validos o conteo incorrecto.")
+    _emit(progress_callback, f"{game_name}: extraccion automatica termino sin quiniela completa.", None)
     return None, errors
+
+
+def _emit(callback: Callable[[str, int | None], None] | None, message: str, progress: int | None = None) -> None:
+    if callback:
+        callback(message, progress)
 
 
 def _try_text_parse_draw(text: str, game_id: str, game_name: str, official_url: str) -> dict | None:

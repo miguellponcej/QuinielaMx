@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from src.active_draws.active_draws_service import get_active_draws
+from src.active_draws.official_sources_client import OfficialSourcesClient
 from src.audit.provenance import PredictionTrace, build_manual_trace
 from src.auth.auth_service import AuthService
 from src.auth.session_manager import AuthUser
@@ -21,11 +24,18 @@ from src.realtime.real_time_prediction_pipeline import real_time_prediction_pipe
 def load_active_draws_home_dashboard(
     auth_service: AuthService,
     force_refresh: bool = False,
+    progress_callback: Callable[[str, int | None], None] | None = None,
 ) -> dict:
     """Load active draws Home data after auth validation."""
 
     user = auth_service.require_authorized_email()
-    return get_active_draws(force_refresh=force_refresh, user_email=user.email)
+    client = OfficialSourcesClient(progress_callback=progress_callback) if progress_callback else None
+    return get_active_draws(
+        force_refresh=force_refresh,
+        user_email=user.email,
+        client=client,
+        progress_callback=progress_callback,
+    )
 
 
 def build_home_view_model(payload: dict, user: AuthUser) -> dict:

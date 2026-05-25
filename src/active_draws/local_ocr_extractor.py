@@ -44,13 +44,20 @@ def extract_text_from_image_payloads(
         return "", [f"OCR local no disponible: Tesseract no esta instalado o no responde ({exc})."]
 
     ocr_lang = lang or os.getenv("LOCAL_OCR_LANG", "spa+eng")
+    max_images = _int_env("LOCAL_OCR_MAX_IMAGES", 3)
+    timeout_seconds = _int_env("LOCAL_OCR_TIMEOUT_SECONDS", 12)
     texts: list[str] = []
-    for index, payload in enumerate(image_payloads, start=1):
+    for index, payload in enumerate(image_payloads[:max_images], start=1):
         try:
             raw = base64.b64decode(payload.get("base64", ""))
             image = Image.open(io.BytesIO(raw))
             image = _prepare_image_for_ocr(image, ImageEnhance, ImageOps)
-            text = pytesseract.image_to_string(image, lang=ocr_lang, config="--psm 6")
+            text = pytesseract.image_to_string(
+                image,
+                lang=ocr_lang,
+                config="--psm 6",
+                timeout=timeout_seconds,
+            )
             if text.strip():
                 texts.append(text)
                 diagnostics.append(f"OCR local leyo imagen {index} con {len(text.strip())} caracteres.")
@@ -186,3 +193,10 @@ def _extract_draw_date(text: str) -> str:
         flags=re.I,
     )
     return re.sub(r"\s+", " ", match.group(1)).strip(" -:.") if match else "Dato no disponible"
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.getenv(name, str(default))))
+    except ValueError:
+        return default

@@ -6,6 +6,7 @@ import sys
 import os
 from pathlib import Path
 from types import SimpleNamespace
+from datetime import datetime
 
 import pandas as pd
 import plotly.express as px
@@ -558,12 +559,29 @@ def render_ai_extraction_panel(config, draw: dict) -> None:
     )
     if st.button("Intentar extraer partidos con OCR/IA ahora"):
         apply_session_ai_credentials(st.session_state)
-        with st.spinner("Leyendo referencias oficiales/secundarias con OCR local e IA opcional..."):
+        extraction_logs: list[dict[str, str]] = []
+        with st.status("Extrayendo quiniela desde referencias oficiales...", expanded=True) as status:
+            log_box = st.empty()
+
+            def log_extraction(message: str, progress: int | None = None) -> None:
+                extraction_logs.append({"hora": datetime.now().strftime("%H:%M:%S"), "paso": message})
+                try:
+                    status.update(label=message, state="running")
+                except Exception:
+                    pass
+                log_box.dataframe(extraction_logs[-30:], use_container_width=True, hide_index=True)
+
             extracted_draw, errors = extract_draw_with_ai(
                 str(draw.get("game_id")),
                 str(draw.get("game_name", config.name)),
                 sources,
                 context_text="Extraccion solicitada manualmente desde la pantalla de prediccion.",
+                progress_callback=log_extraction,
+            )
+            status.update(
+                label="Extraccion terminada." if extracted_draw and extracted_draw.get("matches") else "Extraccion terminada sin quiniela completa.",
+                state="complete" if extracted_draw and extracted_draw.get("matches") else "error",
+                expanded=False,
             )
         if extracted_draw and extracted_draw.get("matches"):
             st.success(f"Se extrajeron {len(extracted_draw['matches'])} partidos. Valida visualmente y actualiza fuentes para guardar el resultado.")
@@ -850,27 +868,48 @@ def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> d
     """Load Home payload with visible progress feedback."""
 
     auto_ai_refresh = has_ai_credentials(st.session_state)
-    if not force_refresh and not auto_ai_refresh:
-        with st.spinner("Cargando sorteos vigentes y recomendaciones..."):
-            return load_active_draws_home_dashboard(auth, force_refresh=False)
-
-    progress_text = st.empty()
+    should_force = force_refresh or auto_ai_refresh
     progress_bar = st.progress(0)
-    progress_text.write("Validando sesion privada...")
-    progress_bar.progress(15)
-    if auto_ai_refresh:
-        progress_text.write("Consultando fuentes y ejecutando extraccion IA automatica si hace falta...")
-    else:
-        progress_text.write("Consultando fuentes oficiales, cache y fuentes deportivas estructuradas...")
-    progress_bar.progress(35)
-    payload = load_active_draws_home_dashboard(auth, force_refresh=True)
-    progress_text.write("Validando frescura, datos faltantes y partidos estructurados...")
-    progress_bar.progress(70)
-    progress_text.write("Calculando recomendaciones y prioridad de analisis...")
-    progress_bar.progress(90)
-    progress_bar.progress(100)
-    progress_text.success("Actualizacion terminada.")
-    return payload
+    logs: list[dict[str, str]] = []
+
+    with st.status("Actualizando Home...", expanded=True) as status:
+        log_box = st.empty()
+
+        def log_step(message: str, progress: int | None = None) -> None:
+            logs.append({"hora": datetime.now().strftime("%H:%M:%S"), "paso": message})
+            if progress is not None:
+                progress_bar.progress(max(0, min(100, int(progress))))
+            try:
+                status.update(label=message, state="running")
+            except Exception:
+                pass
+            log_box.dataframe(logs[-30:], use_container_width=True, hide_index=True)
+
+        log_step("Validando sesion privada y permisos del usuario...", 8)
+        if should_force and auto_ai_refresh:
+            log_step("Actualizacion forzada: OCR/IA automatica disponible para referencias oficiales.", 14)
+        elif should_force:
+            log_step("Actualizacion forzada: consultando fuentes web y cache.", 14)
+        else:
+            log_step("Carga normal: se usara cache vigente si existe; si falta informacion se consultara web.", 14)
+
+        try:
+            payload = load_active_draws_home_dashboard(
+                auth,
+                force_refresh=should_force,
+                progress_callback=log_step,
+            )
+        except Exception as exc:
+            log_step(f"Error durante la actualizacion: {exc}", 100)
+            status.update(label="La actualizacion fallo. Revisa el diagnostico mostrado.", state="error")
+            raise
+
+        log_step(
+            f"Listo: {len(payload.get('draws', []))} juegos procesados en {payload.get('response_seconds', 'N/D')} s.",
+            100,
+        )
+        status.update(label="Actualizacion terminada.", state="complete", expanded=False)
+        return payload
 
 
 def render_source_diagnostics(diagnostics: list[dict], show_title: bool = True) -> None:
