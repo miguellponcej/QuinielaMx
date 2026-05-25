@@ -29,13 +29,27 @@ def load_active_draws_home_dashboard(
     """Load active draws Home data after auth validation."""
 
     user = auth_service.require_authorized_email()
-    client = OfficialSourcesClient(progress_callback=progress_callback) if progress_callback else None
-    return get_active_draws(
-        force_refresh=force_refresh,
-        user_email=user.email,
-        client=client,
-        progress_callback=progress_callback,
-    )
+    try:
+        client = OfficialSourcesClient(progress_callback=progress_callback) if progress_callback else None
+    except TypeError:
+        client = OfficialSourcesClient()
+        if progress_callback:
+            progress_callback("Modo compatibilidad: cliente de fuentes sin progreso interno.", None)
+    try:
+        return get_active_draws(
+            force_refresh=force_refresh,
+            user_email=user.email,
+            client=client,
+            progress_callback=progress_callback,
+        )
+    except TypeError:
+        if progress_callback:
+            progress_callback("Modo compatibilidad: servicio de sorteos sin progreso interno.", None)
+        return get_active_draws(
+            force_refresh=force_refresh,
+            user_email=user.email,
+            client=client,
+        )
 
 
 def build_home_view_model(payload: dict, user: AuthUser) -> dict:

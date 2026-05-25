@@ -894,11 +894,19 @@ def load_home_payload_with_progress(auth: AuthService, force_refresh: bool) -> d
             log_step("Carga normal: se usara cache vigente si existe; si falta informacion se consultara web.", 14)
 
         try:
-            payload = load_active_draws_home_dashboard(
-                auth,
-                force_refresh=should_force,
-                progress_callback=log_step,
-            )
+            try:
+                payload = load_active_draws_home_dashboard(
+                    auth,
+                    force_refresh=should_force,
+                    progress_callback=log_step,
+                )
+            except TypeError as exc:
+                log_step(
+                    "Modo compatibilidad activado: el despliegue no acepto progreso interno; cargando Home sin caerse.",
+                    30,
+                )
+                payload = load_active_draws_home_dashboard(auth, force_refresh=should_force)
+                payload.setdefault("errors", []).append(f"Progreso interno no disponible en este despliegue: {exc}")
         except Exception as exc:
             log_step(f"Error durante la actualizacion: {exc}", 100)
             status.update(label="La actualizacion fallo. Revisa el diagnostico mostrado.", state="error")
