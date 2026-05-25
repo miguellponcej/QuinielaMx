@@ -52,11 +52,17 @@ def extract_draw_with_ai(
 
     text_chunks = [context_text]
     images: list[dict[str, str]] = []
-    for url in allowed_urls[:4]:
+    errors.append(f"Extraccion IA iniciada con {len(allowed_urls)} referencia(s) permitida(s).")
+    for url in allowed_urls[:6]:
         content, mime_type, error = _fetch_binary(url, timeout_seconds=timeout_seconds)
         if error:
             errors.append(error)
             continue
+        if mime_type.startswith("text/") or mime_type in {"application/xhtml+xml", "text/html"}:
+            try:
+                text_chunks.append(content.decode("utf-8", errors="replace")[:12000])
+            except Exception:
+                pass
         if mime_type == "application/pdf" or url.lower().split("?")[0].endswith(".pdf"):
             extracted_text, pdf_error = extract_pdf_text(content)
             if extracted_text:
@@ -66,6 +72,7 @@ def extract_draw_with_ai(
             images.extend(_pdf_pages_as_images(content, max_pages=2))
         elif mime_type.startswith("image/"):
             images.append(_image_payload(content, mime_type))
+    errors.append(f"Extraccion IA preparo {len(images)} imagen(es) y {sum(len(chunk) for chunk in text_chunks)} caracteres de texto.")
 
     prompt = _build_prompt(game_id, game_name, "\n\n".join(chunk for chunk in text_chunks if chunk), allowed_urls)
     responses = []
@@ -83,6 +90,9 @@ def extract_draw_with_ai(
             continue
         draw = _draw_from_ai_payload(parsed, game_id, game_name, allowed_urls[0], response.provider)
         if _validate_draw(draw, game_id):
+            draw["source_warnings"] = list(
+                dict.fromkeys([*(draw.get("source_warnings") or []), *errors])
+            )
             return draw, errors
         errors.append(f"{response.provider}: respuesta IA sin partidos validos o conteo incorrecto.")
     return None, errors
@@ -180,9 +190,15 @@ def _parse_ai_json(text: str) -> tuple[dict[str, Any], str | None]:
 
 def _fetch_binary(url: str, timeout_seconds: int) -> tuple[bytes, str, str | None]:
     try:
+        parsed = urllib.parse.urlparse(url)
+        referer = f"{parsed.scheme}://{parsed.netloc}/"
         request = urllib.request.Request(
             url,
-            headers={"User-Agent": "QuinielaPredictorMX/0.1 (+official AI extractor)"},
+            headers={
+                "User-Agent": "Mozilla/5.0 QuinielaPredictorMX/0.1 (+official AI extractor)",
+                "Accept": "text/html,application/pdf,image/avif,image/webp,image/png,image/jpeg,*/*",
+                "Referer": referer,
+            },
         )
         with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
             content = response.read()

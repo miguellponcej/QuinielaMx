@@ -43,6 +43,22 @@ def call_openai_json(
 ) -> LLMResponse:
     """Call OpenAI vision/text model and request JSON."""
 
+    response = _call_openai_chat_json(prompt, images=images, timeout_seconds=timeout_seconds)
+    if response.ok:
+        return response
+    fallback = _call_openai_responses_json(prompt, images=images, timeout_seconds=timeout_seconds)
+    if fallback.ok:
+        return fallback
+    return LLMResponse(False, "openai", "", f"{response.error} | fallback responses: {fallback.error}")
+
+
+def _call_openai_chat_json(
+    prompt: str,
+    images: list[dict[str, str]] | None = None,
+    timeout_seconds: int = 45,
+) -> LLMResponse:
+    """Call legacy-compatible Chat Completions JSON mode."""
+
     key = os.getenv("OPENAI_API_KEY")
     if not key:
         return LLMResponse(False, "openai", "", "OPENAI_API_KEY no configurada.")
@@ -70,6 +86,42 @@ def call_openai_json(
         method="POST",
     )
     return _send_json_request(request, "openai", timeout_seconds, _parse_openai_text)
+
+
+def _call_openai_responses_json(
+    prompt: str,
+    images: list[dict[str, str]] | None = None,
+    timeout_seconds: int = 45,
+) -> LLMResponse:
+    """Call OpenAI Responses API as fallback."""
+
+    key = os.getenv("OPENAI_API_KEY")
+    if not key:
+        return LLMResponse(False, "openai", "", "OPENAI_API_KEY no configurada.")
+    content: list[dict[str, Any]] = [{"type": "input_text", "text": prompt}]
+    for image in images or []:
+        content.append(
+            {
+                "type": "input_image",
+                "image_url": f"data:{image['mime_type']};base64,{image['base64']}",
+            }
+        )
+    payload = {
+        "model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "input": [{"role": "user", "content": content}],
+        "text": {"format": {"type": "json_object"}},
+        "temperature": 0.0,
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+        },
+        method="POST",
+    )
+    return _send_json_request(request, "openai", timeout_seconds, _parse_openai_responses_text)
 
 
 def call_anthropic_json(
@@ -130,6 +182,17 @@ def _parse_openai_text(payload: dict[str, Any]) -> str:
     if not choices:
         return ""
     return str(choices[0].get("message", {}).get("content", ""))
+
+
+def _parse_openai_responses_text(payload: dict[str, Any]) -> str:
+    if payload.get("output_text"):
+        return str(payload["output_text"])
+    texts = []
+    for item in payload.get("output", []) or []:
+        for part in item.get("content", []) or []:
+            if part.get("type") in {"output_text", "text"} and part.get("text"):
+                texts.append(str(part["text"]))
+    return "\n".join(texts)
 
 
 def _parse_anthropic_text(payload: dict[str, Any]) -> str:

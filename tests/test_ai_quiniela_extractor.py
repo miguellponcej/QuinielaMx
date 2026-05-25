@@ -1,4 +1,5 @@
 from src.active_draws.ai_quiniela_extractor import _draw_from_ai_payload, _validate_draw, extract_draw_with_ai
+from src.ai.llm_clients import _parse_openai_responses_text
 
 
 def test_ai_payload_converts_to_valid_media_semana_draw():
@@ -56,3 +57,17 @@ def test_ai_extraction_requires_configured_provider(monkeypatch):
 
     assert draw is None
     assert any("OPENAI_API_KEY" in error or "ANTHROPIC_API_KEY" in error for error in errors)
+
+
+def test_parse_openai_responses_text():
+    payload = {
+        "output": [
+            {
+                "content": [
+                    {"type": "output_text", "text": '{"matches":[]}'},
+                ]
+            }
+        ]
+    }
+
+    assert _parse_openai_responses_text(payload) == '{"matches":[]}'

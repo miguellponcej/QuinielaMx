@@ -202,6 +202,7 @@ class OfficialSourcesClient:
             sources = [url, *guide_sources]
         else:
             sources = [url]
+        draw["alternate_sources"] = list(dict.fromkeys([*(draw.get("alternate_sources") or []), *sources]))
         return FetchResult(ok=bool(draw.get("matches")), draws=[draw], errors=[], sources=sources)
 
     def _fetch_secondary_program_reference(self, game_id: str, game_name: str) -> tuple[dict | None, list[str], list[str]]:

@@ -33,6 +33,7 @@ from src.auth.auth_config import AuthConfig
 from src.auth.auth_service import AuthService
 from src.auth.session_manager import AuthUser
 from src.config.games import GameType, OptimizationGoal, RiskProfile, get_game_config
+from src.active_draws.ai_quiniela_extractor import extract_draw_with_ai
 from src.home.home_cards import render_draw_card, render_missing_data, render_official_reference
 from src.home.home_dashboard import (
     build_home_view_model,
@@ -225,6 +226,23 @@ def show_private_app(auth: AuthService, user: AuthUser) -> None:
 
     payload = load_active_draws_home_dashboard(auth, force_refresh=force_web_refresh)
     selected_draw = find_draw_for_game(payload.get("draws", []), game_type)
+    recovered_draw = st.session_state.get(f"ai_extracted_{game_id_from_type(game_type)}")
+    if selected_draw and recovered_draw and recovered_draw.get("matches") and not selected_draw.get("matches"):
+        selected_draw = {
+            **selected_draw,
+            "matches": recovered_draw["matches"],
+            "draw_number": recovered_draw.get("draw_number", selected_draw.get("draw_number")),
+            "draw_date": recovered_draw.get("draw_date", selected_draw.get("draw_date")),
+            "raw_source": f"{selected_draw.get('raw_source', '')}+sesion_ia_validada",
+            "source_warnings": list(
+                dict.fromkeys(
+                    [
+                        *(selected_draw.get("source_warnings") or []),
+                        "Partidos recuperados desde extraccion IA validada en esta sesion.",
+                    ]
+                )
+            ),
+        }
     trace = build_web_trace(selected_draw, payload)
 
     if not selected_draw or not selected_draw.get("matches"):
@@ -328,6 +346,7 @@ def render_web_data_unavailable(config, draw: dict | None, payload: dict, trace)
             use_container_width=True,
             hide_index=True,
         )
+        render_ai_extraction_panel(config, draw)
     if payload.get("errors"):
         with st.expander("Errores de fuentes web"):
             for error in payload["errors"]:
@@ -496,6 +515,52 @@ def render_historics(config) -> None:
         "El aprendizaje del modelo se activa automaticamente cuando existen suficientes concursos comparados "
         "contra resultados oficiales. No se sobreajusta con muestras pequenas."
     )
+
+
+def render_ai_extraction_panel(config, draw: dict) -> None:
+    """Render explicit AI extraction action when prediction is blocked."""
+
+    st.subheader("Extraccion IA de la quiniela")
+    sources = list(
+        dict.fromkeys(
+            [
+                str(draw.get("official_url", "")),
+                *[str(source) for source in draw.get("alternate_sources", []) or []],
+                *[str(item.get("url")) for item in draw.get("source_artifacts", []) if item.get("url")],
+            ]
+        )
+    )
+    status_rows = ai_connection_status(st.session_state)
+    st.dataframe(
+        [
+            {"servicio": item["provider"], "estado": item["status"], "modelo": item["model"]}
+            for item in status_rows.values()
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.caption("La extraccion IA usa las referencias registradas y desbloquea prediccion solo si obtiene todos los partidos validos.")
+    if st.button("Intentar extraer partidos con IA ahora"):
+        apply_session_ai_credentials(st.session_state)
+        with st.spinner("Leyendo referencias oficiales/secundarias con IA..."):
+            extracted_draw, errors = extract_draw_with_ai(
+                str(draw.get("game_id")),
+                str(draw.get("game_name", config.name)),
+                sources,
+                context_text="Extraccion solicitada manualmente desde la pantalla de prediccion.",
+            )
+        if extracted_draw and extracted_draw.get("matches"):
+            st.success(f"IA extrajo {len(extracted_draw['matches'])} partidos. Valida visualmente y actualiza fuentes para guardar el resultado.")
+            st.dataframe(extracted_draw["matches"], use_container_width=True, hide_index=True)
+            st.session_state[f"ai_extracted_{draw.get('game_id')}"] = extracted_draw
+            st.info("Se usaran estos partidos para generar prediccion en esta sesion.")
+            st.rerun()
+        else:
+            st.error("La IA no logro estructurar una quiniela completa y validada.")
+        if errors:
+            with st.expander("Diagnostico de extraccion IA", expanded=True):
+                for error in errors:
+                    st.write(f"- {error}")
 
 
 def render_ai_connections(user: AuthUser) -> None:
