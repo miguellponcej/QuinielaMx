@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import pandas as pd
 import requests
@@ -23,10 +25,33 @@ st.set_page_config(page_title=APP_NAME, page_icon="💼", layout="wide")
 
 
 def secret(name: str, default: str = "") -> str:
+    env_value = os.environ.get(name)
     try:
-        return str(st.secrets.get(name, default))
+        value = st.secrets.get(name)
     except Exception:
-        return default
+        value = None
+    if value is None or str(value).strip() == "":
+        value = env_value
+    return str(value) if value is not None else default
+
+
+def app_base_url() -> str:
+    configured_url = secret("APP_BASE_URL")
+    if configured_url:
+        return configured_url.rstrip("/")
+
+    try:
+        current_url = str(st.context.url or "")
+    except Exception:
+        current_url = ""
+
+    if current_url:
+        parsed = urlsplit(current_url)
+        if parsed.scheme and parsed.netloc:
+            path = parsed.path.rstrip("/")
+            return urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
+
+    return "http://localhost:8501"
 
 
 def init_db() -> None:
@@ -134,7 +159,7 @@ def paypal_config() -> PayPalConfig:
         mode=secret("PAYPAL_MODE", "sandbox").lower(),
         client_id=secret("PAYPAL_CLIENT_ID"),
         client_secret=secret("PAYPAL_CLIENT_SECRET"),
-        app_base_url=secret("APP_BASE_URL", "http://localhost:8501").rstrip("/"),
+        app_base_url=app_base_url(),
     )
 
 
@@ -187,6 +212,7 @@ def main() -> None:
         st.header("Configuracion")
         st.write("PayPal:", "configurado" if config.is_configured else "pendiente")
         st.write("Modo:", config.mode)
+        st.caption(f"Retorno PayPal: {config.app_base_url}")
         btc_address = secret("OWNER_BTC_PUBLIC_ADDRESS", "")
         st.text_input("Wallet BTC publica", value=btc_address, disabled=True)
         st.caption("Solo referencia publica. No se solicitan ni guardan llaves privadas.")

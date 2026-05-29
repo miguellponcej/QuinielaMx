@@ -53,7 +53,8 @@ Streamlit's official deployment docs state that Community Cloud deploys from you
 Paste this into Streamlit Cloud > App > Settings > Secrets, replacing the values:
 
 ```toml
-APP_BASE_URL = "https://your-app-name.streamlit.app"
+# Optional. If blank, the app detects its public Streamlit URL automatically.
+APP_BASE_URL = ""
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
@@ -61,6 +62,8 @@ OWNER_BTC_PUBLIC_ADDRESS = "your-public-btc-address"
 ```
 
 Use `sandbox` first. Switch `PAYPAL_MODE` to `live` only after a successful test purchase.
+
+`APP_BASE_URL` is only needed when you want to force a custom return URL. Otherwise, the app uses Streamlit's runtime URL as the PayPal return/cancel base.
 
 ## PayPal setup
 
@@ -88,7 +91,7 @@ python -m pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-For local PayPal tests, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in sandbox credentials.
+For local PayPal tests, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in sandbox credentials. Local tests default the PayPal return URL to `http://localhost:8501` when `APP_BASE_URL` is blank.
 
 ## Sources
 

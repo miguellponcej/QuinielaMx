@@ -52,7 +52,7 @@ Branch: ai-money-machine-streamlit
 Main file path: streamlit_app.py
 ```
 
-Configura `APP_BASE_URL`, `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio.
+Configura `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio. `APP_BASE_URL` es opcional; si queda vacio, la app detecta la URL publica de Streamlit para el retorno de PayPal.
 
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
