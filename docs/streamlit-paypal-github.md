@@ -66,6 +66,8 @@ PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
 PAYPAL_PUBLIC_HANDLE = "miguellponcej"
 OWNER_BTC_PUBLIC_ADDRESS = "your-public-btc-address"
+RESEND_API_KEY = ""
+EMAIL_FROM = "AI Digital Product Money Machine <onboarding@resend.dev>"
 ```
 
 Use `sandbox` first. Switch `PAYPAL_MODE` to `live` only after a successful test purchase.
@@ -81,6 +83,7 @@ The deployed Streamlit app also includes:
 - Product draft/publish persistence in local SQLite.
 - Unique expiring download links after PayPal capture.
 - Basic receipt download after payment confirmation.
+- Optional confirmation email through Resend when `RESEND_API_KEY` and `EMAIL_FROM` are configured.
 - Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, customers, pending payments, completed payments, and CSV export.
 - Admin tab for product price updates, delete actions, pending orders, and audit logs.
 - Marketing tab with social/email/WhatsApp copy, A/B headline/CTA variants, and a simple content calendar.

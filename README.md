@@ -66,6 +66,8 @@ La version Streamlit incluye persistencia local de productos, publicacion/borrad
 
 `PAYPAL_PUBLIC_HANDLE` puede quedar como `miguellponcej` para mostrar un fallback de pago manual. Para checkout y entrega automatica siguen siendo necesarias las credenciales API de PayPal.
 
+Para correo automatico de confirmacion, configura `RESEND_API_KEY` y `EMAIL_FROM` en Streamlit Secrets. Si faltan, la entrega por descarga y recibo sigue funcionando dentro de la app.
+
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
 ## Stripe

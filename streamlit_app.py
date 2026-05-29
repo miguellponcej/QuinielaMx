@@ -31,6 +31,8 @@ PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
 PAYPAL_PUBLIC_HANDLE = "miguellponcej"
 OWNER_BTC_PUBLIC_ADDRESS = "your-public-btc-address"
+RESEND_API_KEY = ""
+EMAIL_FROM = "AI Digital Product Money Machine <onboarding@resend.dev>"
 """
 
 
@@ -333,6 +335,45 @@ def receipt_text(order_id: str, product: dict[str, Any]) -> str:
     )
 
 
+def payer_email(capture_payload: dict[str, Any]) -> str:
+    payer = capture_payload.get("payer", {})
+    return str(payer.get("email_address", "")).strip()
+
+
+def send_delivery_email(customer_email: str, product: dict[str, Any], download_url: str, order_id: str) -> bool:
+    api_key = secret("RESEND_API_KEY")
+    email_from = secret("EMAIL_FROM", "AI Digital Product Money Machine <onboarding@resend.dev>")
+    if not api_key or not customer_email:
+        log_event("skip", "email", order_id, {"reason": "missing_email_config_or_customer"})
+        return False
+
+    payload = {
+        "from": email_from,
+        "to": [customer_email],
+        "subject": f"Tu descarga: {product['title']}",
+        "text": "\n".join(
+            [
+                "Gracias por tu compra.",
+                f"Producto: {product['title']}",
+                f"Orden PayPal: {order_id}",
+                f"Descarga: {download_url}",
+                "El link expira en 48 horas o despues de 3 descargas.",
+                "",
+                receipt_text(order_id, product),
+            ]
+        ),
+    }
+    response = requests.post(
+        "https://api.resend.com/emails",
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=20,
+    )
+    response.raise_for_status()
+    log_event("send", "email", order_id, {"to": customer_email})
+    return True
+
+
 def sales_frame() -> pd.DataFrame:
     init_db()
     with sqlite3.connect(DB_PATH) as conn:
@@ -476,9 +517,14 @@ def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> b
             record_sale(str(token), purchased_product, payload)
             download_token, expires_at = create_download_link(str(token), purchased_product)
             download_url = f"{config.app_base_url}?download_token={download_token}"
+            email_sent = send_delivery_email(payer_email(payload), purchased_product, download_url, str(token))
             st.success("Pago confirmado. Tu descarga esta lista.")
             st.code(download_url, language="text")
             st.caption(f"Link unico valido hasta {expires_at} UTC o 3 descargas.")
+            if email_sent:
+                st.info("Correo de confirmacion enviado al comprador.")
+            else:
+                st.info("Correo no enviado: configura RESEND_API_KEY y EMAIL_FROM para activar envio automatico.")
             st.download_button(
                 "Descargar PDF comprado",
                 data=product_pdf_bytes(product_from_dict(purchased_product)),
