@@ -28,6 +28,12 @@ Branch: ai-money-machine-streamlit
 Main file path: streamlit_app.py
 ```
 
+If Streamlit shows the "Paste GitHub URL" option, paste this exact file URL:
+
+```text
+https://github.com/miguellponcej/QuinielaMx/blob/ai-money-machine-streamlit/streamlit_app.py
+```
+
 2. Open Streamlit Community Cloud.
 3. Create a new app from the GitHub repo.
 4. Set the main file path to:

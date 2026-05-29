@@ -52,6 +52,12 @@ Branch: ai-money-machine-streamlit
 Main file path: streamlit_app.py
 ```
 
+Tambien puedes usar "Paste GitHub URL" en Streamlit con:
+
+```text
+https://github.com/miguellponcej/QuinielaMx/blob/ai-money-machine-streamlit/streamlit_app.py
+```
+
 Configura `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio. `APP_BASE_URL` es opcional; si queda vacio, la app detecta la URL publica de Streamlit para el retorno de PayPal.
 
 Detalles completos: `docs/streamlit-paypal-github.md`.
