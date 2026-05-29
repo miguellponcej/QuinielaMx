@@ -16,6 +16,12 @@ import streamlit as st
 from streamlit_src.paypal import PayPalConfig, capture_order, create_order, paypal_access_token
 from streamlit_src.pdf_delivery import product_pdf_bytes
 from streamlit_src.product_engine import analyze_niche, generate_product, marketing_assets, product_from_dict
+from streamlit_src.stripe_checkout import (
+    StripeConfig,
+    create_checkout_session,
+    retrieve_checkout_session,
+    stripe_account,
+)
 
 
 APP_NAME = "AI Digital Product Money Machine"
@@ -26,6 +32,7 @@ DEPLOY_FILE_URL = (
 )
 GITHUB_BRANCH_URL = "https://github.com/miguellponcej/QuinielaMx/tree/ai-money-machine-streamlit"
 SECRETS_TEMPLATE = """APP_BASE_URL = ""
+STRIPE_SECRET_KEY = "sk_test_replace_me"
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
@@ -106,6 +113,16 @@ def init_db() -> None:
             """
             create table if not exists pending_orders (
                 paypal_order_id text primary key,
+                product_slug text not null,
+                product_json text not null,
+                created_at text not null
+            )
+            """
+        )
+        conn.execute(
+            """
+            create table if not exists pending_stripe_sessions (
+                stripe_session_id text primary key,
                 product_slug text not null,
                 product_json text not null,
                 created_at text not null
@@ -240,9 +257,48 @@ def pending_product_for_order(order_id: str) -> dict[str, Any] | None:
     return json.loads(row[0])
 
 
-def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[str, Any]) -> None:
+def record_pending_stripe_session(session_id: str, product: dict[str, Any]) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            insert or replace into pending_stripe_sessions (
+                stripe_session_id, product_slug, product_json, created_at
+            ) values (?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                product["slug"],
+                json.dumps(product, ensure_ascii=False),
+                now_utc(),
+            ),
+        )
+    log_event("create", "pending_stripe_session", session_id, {"product_slug": product["slug"]})
+
+
+def pending_product_for_stripe_session(session_id: str) -> dict[str, Any] | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "select product_json from pending_stripe_sessions where stripe_session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return json.loads(row[0])
+
+
+def customer_email_from_payload(capture_payload: dict[str, Any]) -> str:
     payer = capture_payload.get("payer", {})
-    email = payer.get("email_address", "")
+    if payer.get("email_address"):
+        return str(payer.get("email_address", "")).strip()
+    customer_details = capture_payload.get("customer_details", {})
+    if customer_details.get("email"):
+        return str(customer_details.get("email", "")).strip()
+    return str(capture_payload.get("customer_email", "")).strip()
+
+
+def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[str, Any]) -> None:
+    email = customer_email_from_payload(capture_payload)
+    status = str(capture_payload.get("payment_status") or capture_payload.get("status", "CAPTURED")).upper()
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
@@ -257,9 +313,9 @@ def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[st
                 product["title"],
                 email,
                 float(product["price_usd"]),
-                capture_payload.get("status", "CAPTURED"),
+                status,
                 now_utc(),
-                json.dumps(capture_payload),
+                json.dumps(capture_payload, ensure_ascii=False),
             ),
         )
     log_event("capture", "payment", order_id, {"product_slug": product["slug"]})
@@ -273,7 +329,7 @@ def confirm_manual_payment(order_id: str, product: dict[str, Any], customer_emai
         "verified_by": "admin",
     }
     record_sale(order_id, product, payload)
-    download_token, expires_at = create_download_link(order_id, product)
+    download_token, expires_at = ensure_download_link(order_id, product)
     download_url = f"{config.app_base_url}?download_token={download_token}"
     email_sent = send_delivery_email(customer_email, product, download_url, order_id)
     log_event("confirm", "manual_payment", order_id, {"product_slug": product["slug"], "email_sent": email_sent})
@@ -304,6 +360,30 @@ def create_download_link(order_id: str, product: dict[str, Any]) -> tuple[str, s
         )
     log_event("create", "download_link", token, {"order_id": order_id, "product_slug": product["slug"]})
     return token, expires_at.isoformat()
+
+
+def download_link_for_order(order_id: str) -> tuple[str, str] | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            """
+            select token, expires_at
+            from download_links
+            where paypal_order_id = ?
+            order by created_at desc
+            limit 1
+            """,
+            (order_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return str(row[0]), str(row[1])
+
+
+def ensure_download_link(order_id: str, product: dict[str, Any]) -> tuple[str, str]:
+    existing = download_link_for_order(order_id)
+    if existing:
+        return existing
+    return create_download_link(order_id, product)
 
 
 def product_for_download_token(token: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -337,11 +417,12 @@ def record_download_token(token: str) -> None:
 
 
 def receipt_text(order_id: str, product: dict[str, Any]) -> str:
+    payment_label = "Sesion Stripe" if order_id.startswith("stripe_") else "Orden PayPal"
     return "\n".join(
         [
             APP_NAME,
             "Recibo basico",
-            f"Orden PayPal: {order_id}",
+            f"{payment_label}: {order_id}",
             f"Producto: {product['title']}",
             f"Monto: ${float(product['price_usd']):.2f} USD",
             f"Fecha UTC: {now_utc()}",
@@ -351,8 +432,7 @@ def receipt_text(order_id: str, product: dict[str, Any]) -> str:
 
 
 def payer_email(capture_payload: dict[str, Any]) -> str:
-    payer = capture_payload.get("payer", {})
-    return str(payer.get("email_address", "")).strip()
+    return customer_email_from_payload(capture_payload)
 
 
 def send_delivery_email(customer_email: str, product: dict[str, Any], download_url: str, order_id: str) -> bool:
@@ -370,7 +450,7 @@ def send_delivery_email(customer_email: str, product: dict[str, Any], download_u
             [
                 "Gracias por tu compra.",
                 f"Producto: {product['title']}",
-                f"Orden PayPal: {order_id}",
+                f"Pago: {order_id}",
                 f"Descarga: {download_url}",
                 "El link expira en 48 horas o despues de 3 descargas.",
                 "",
@@ -401,6 +481,29 @@ def pending_orders_frame() -> pd.DataFrame:
         return pd.read_sql_query("select * from pending_orders order by created_at desc", conn)
 
 
+def pending_stripe_sessions_frame() -> pd.DataFrame:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        return pd.read_sql_query("select * from pending_stripe_sessions order by created_at desc", conn)
+
+
+def pending_payments_frame() -> pd.DataFrame:
+    paypal_df = pending_orders_frame()
+    stripe_df = pending_stripe_sessions_frame()
+    frames = []
+    if not paypal_df.empty:
+        paypal_view = paypal_df.rename(columns={"paypal_order_id": "payment_id"}).copy()
+        paypal_view["provider"] = "paypal"
+        frames.append(paypal_view[["provider", "payment_id", "product_slug", "created_at"]])
+    if not stripe_df.empty:
+        stripe_view = stripe_df.rename(columns={"stripe_session_id": "payment_id"}).copy()
+        stripe_view["provider"] = "stripe"
+        frames.append(stripe_view[["provider", "payment_id", "product_slug", "created_at"]])
+    if not frames:
+        return pd.DataFrame(columns=["provider", "payment_id", "product_slug", "created_at"])
+    return pd.concat(frames, ignore_index=True).sort_values("created_at", ascending=False)
+
+
 def audit_frame() -> pd.DataFrame:
     init_db()
     with sqlite3.connect(DB_PATH) as conn:
@@ -409,7 +512,7 @@ def audit_frame() -> pd.DataFrame:
 
 def revenue_summary() -> dict[str, float | int]:
     df = sales_frame()
-    pending_df = pending_orders_frame()
+    pending_df = pending_payments_frame()
     gross = float(df["amount_usd"].sum()) if not df.empty else 0.0
     completed = int(len(df))
     pending = int(len(pending_df))
@@ -446,6 +549,13 @@ def paypal_config() -> PayPalConfig:
     )
 
 
+def stripe_config() -> StripeConfig:
+    return StripeConfig(
+        secret_key=secret("STRIPE_SECRET_KEY"),
+        app_base_url=app_base_url(),
+    )
+
+
 def paypal_public_handle() -> str:
     handle = secret("PAYPAL_PUBLIC_HANDLE", "miguellponcej").strip()
     return handle.lstrip("@")
@@ -453,26 +563,28 @@ def paypal_public_handle() -> str:
 
 def render_security_notice() -> None:
     st.info(
-        "Venta legitima: PayPal procesa el pago. Esta app no guarda tarjetas, cuentas bancarias, "
+        "Venta legitima: Stripe o PayPal procesan el pago. Esta app no guarda tarjetas, cuentas bancarias, "
         "seed phrases, private keys ni contrasenas de wallet."
     )
 
 
-def missing_setup_items(config: PayPalConfig, btc_address: str) -> list[str]:
+def missing_setup_items(paypal: PayPalConfig, stripe: StripeConfig, btc_address: str) -> list[str]:
     missing = []
-    if not config.client_id.strip() or config.client_id.startswith(("replace", "your-")):
-        missing.append("PAYPAL_CLIENT_ID")
-    if not config.client_secret.strip() or config.client_secret.startswith(("replace", "your-")):
-        missing.append("PAYPAL_CLIENT_SECRET")
-    if config.mode not in {"sandbox", "live"}:
+    if not stripe.is_configured:
+        missing.append("STRIPE_SECRET_KEY")
+    if not paypal.client_id.strip() or paypal.client_id.startswith(("replace", "your-")):
+        missing.append("PAYPAL_CLIENT_ID para respaldo PayPal")
+    if not paypal.client_secret.strip() or paypal.client_secret.startswith(("replace", "your-")):
+        missing.append("PAYPAL_CLIENT_SECRET para respaldo PayPal")
+    if paypal.mode not in {"sandbox", "live"}:
         missing.append("PAYPAL_MODE debe ser sandbox o live")
     if not btc_address.strip() or btc_address.startswith(("replace", "your-")):
         missing.append("OWNER_BTC_PUBLIC_ADDRESS")
     return missing
 
 
-def render_setup_tab(config: PayPalConfig, btc_address: str, public_paypal_handle: str) -> None:
-    st.subheader("Setup de Streamlit, GitHub y PayPal")
+def render_setup_tab(paypal: PayPalConfig, stripe: StripeConfig, btc_address: str, public_paypal_handle: str) -> None:
+    st.subheader("Setup de Streamlit, GitHub, Stripe y PayPal")
     st.write("Usa estos datos para levantar la app en Streamlit Cloud desde tu GitHub.")
     col_a, col_b = st.columns(2)
     col_a.link_button("Abrir archivo para Streamlit", DEPLOY_FILE_URL, width="stretch")
@@ -481,29 +593,41 @@ def render_setup_tab(config: PayPalConfig, btc_address: str, public_paypal_handl
 
     st.write("Pega esta plantilla en Streamlit Cloud > App > Settings > Secrets.")
     st.code(SECRETS_TEMPLATE, language="toml")
-    st.caption("APP_BASE_URL puede quedar vacio; la app detecta su URL publica para el retorno de PayPal.")
+    st.caption("APP_BASE_URL puede quedar vacio; la app detecta su URL publica para retornos de Stripe y PayPal.")
 
-    missing = missing_setup_items(config, btc_address)
+    missing = missing_setup_items(paypal, stripe, btc_address)
     if missing:
         st.warning("Configuracion pendiente: " + ", ".join(missing))
     else:
         st.success("Los secretos basicos estan presentes.")
 
     st.write("Estado detectado")
-    status_col_1, status_col_2, status_col_3, status_col_4 = st.columns(4)
-    status_col_1.metric("PayPal", "listo" if config.is_configured else "pendiente")
-    status_col_2.metric("Modo", config.mode)
-    status_col_3.metric("Wallet BTC", "lista" if btc_address.strip() else "pendiente")
-    status_col_4.metric("PayPal publico", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
-    st.caption(f"URL de retorno PayPal detectada: {config.app_base_url}")
+    status_col_1, status_col_2, status_col_3, status_col_4, status_col_5 = st.columns(5)
+    status_col_1.metric("Stripe", "listo" if stripe.is_configured else "pendiente")
+    status_col_2.metric("PayPal", "listo" if paypal.is_configured else "pendiente")
+    status_col_3.metric("Modo PayPal", paypal.mode)
+    status_col_4.metric("Wallet BTC", "lista" if btc_address.strip() else "pendiente")
+    status_col_5.metric("PayPal publico", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
+    st.caption(f"URL de retorno detectada: {stripe.app_base_url}")
+
+    if st.button("Probar conexion Stripe", width="stretch"):
+        if not stripe.is_configured:
+            st.error("Agrega STRIPE_SECRET_KEY en Streamlit Secrets antes de probar.")
+        else:
+            with st.spinner("Probando credenciales con Stripe..."):
+                try:
+                    account = stripe_account(stripe)
+                    st.success(f"Stripe respondio correctamente. Cuenta: {account.get('id', 'activa')}")
+                except Exception as exc:
+                    st.error(f"Stripe no respondio con esas credenciales: {exc}")
 
     if st.button("Probar conexion PayPal", width="stretch"):
-        if not config.is_configured:
+        if not paypal.is_configured:
             st.error("Agrega PAYPAL_CLIENT_ID y PAYPAL_CLIENT_SECRET en Streamlit Secrets antes de probar.")
         else:
             with st.spinner("Probando credenciales con PayPal..."):
                 try:
-                    paypal_access_token(config)
+                    paypal_access_token(paypal)
                     st.success("PayPal respondio correctamente. El checkout puede crear ordenes.")
                 except Exception as exc:
                     st.error(f"PayPal no respondio con esas credenciales: {exc}")
@@ -548,7 +672,7 @@ def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> b
             purchased_product = pending_product_for_order(str(token)) or product
             payload = capture_order(config, str(token))
             record_sale(str(token), purchased_product, payload)
-            download_token, expires_at = create_download_link(str(token), purchased_product)
+            download_token, expires_at = ensure_download_link(str(token), purchased_product)
             download_url = f"{config.app_base_url}?download_token={download_token}"
             email_sent = send_delivery_email(payer_email(payload), purchased_product, download_url, str(token))
             st.success("Pago confirmado. Tu descarga esta lista.")
@@ -578,22 +702,85 @@ def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> b
             return False
 
 
+def capture_stripe_return_if_needed(product: dict[str, Any], config: StripeConfig) -> bool:
+    params = st.query_params
+    session_id = params.get("session_id")
+    returned = params.get("stripe_success")
+    canceled = params.get("stripe_cancel")
+
+    if canceled:
+        st.warning("Checkout de Stripe cancelado. No se registro ningun pago.")
+        return True
+    if not session_id or not returned:
+        return False
+
+    if not config.is_configured:
+        st.error("Stripe no esta configurado en Streamlit Secrets; no se puede verificar el pago.")
+        return True
+
+    with st.spinner("Verificando pago con Stripe..."):
+        try:
+            payload = retrieve_checkout_session(config, str(session_id))
+            if str(payload.get("payment_status", "")).lower() != "paid":
+                st.warning("Stripe aun no marca este pago como pagado. No se libero la descarga.")
+                return True
+
+            metadata = payload.get("metadata", {}) or {}
+            purchased_product = (
+                pending_product_for_stripe_session(str(session_id))
+                or saved_product(str(metadata.get("product_slug", "")))
+                or product
+            )
+            payment_id = f"stripe_{session_id}"
+            record_sale(payment_id, purchased_product, {**payload, "provider": "stripe"})
+            download_token, expires_at = ensure_download_link(payment_id, purchased_product)
+            download_url = f"{config.app_base_url}?download_token={download_token}"
+            email_sent = send_delivery_email(payer_email(payload), purchased_product, download_url, payment_id)
+            st.success("Pago Stripe confirmado. Tu descarga esta lista.")
+            st.code(download_url, language="text")
+            st.caption(f"Link unico valido hasta {expires_at} UTC o 3 descargas.")
+            if email_sent:
+                st.info("Correo de confirmacion enviado al comprador.")
+            else:
+                st.info("Correo no enviado: configura RESEND_API_KEY y EMAIL_FROM para activar envio automatico.")
+            st.download_button(
+                "Descargar PDF comprado",
+                data=product_pdf_bytes(product_from_dict(purchased_product)),
+                file_name=f"{purchased_product['slug']}.pdf",
+                mime="application/pdf",
+                width="stretch",
+            )
+            st.download_button(
+                "Descargar recibo",
+                data=receipt_text(payment_id, purchased_product),
+                file_name=f"recibo-{purchased_product['slug']}.txt",
+                mime="text/plain",
+                width="stretch",
+            )
+            return True
+        except Exception as exc:
+            st.error(f"No se pudo verificar el pago de Stripe: {exc}")
+            return True
+
+
 def main() -> None:
     init_db()
-    config = paypal_config()
+    paypal = paypal_config()
+    stripe = stripe_config()
     public_paypal_handle = paypal_public_handle()
 
     st.title(APP_NAME)
-    st.caption("Crea, publica, cobra con PayPal y entrega productos digitales reales.")
+    st.caption("Crea, publica, cobra con Stripe/PayPal y entrega productos digitales reales.")
     render_security_notice()
     render_download_token_if_needed()
 
     with st.sidebar:
         st.header("Configuracion")
-        st.write("PayPal:", "configurado" if config.is_configured else "pendiente")
-        st.write("Modo:", config.mode)
+        st.write("Stripe:", "configurado" if stripe.is_configured else "pendiente")
+        st.write("PayPal:", "configurado" if paypal.is_configured else "pendiente")
+        st.write("Modo PayPal:", paypal.mode)
         st.write("PayPal publico:", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
-        st.caption(f"Retorno PayPal: {config.app_base_url}")
+        st.caption(f"Retorno: {stripe.app_base_url}")
         btc_address = secret("OWNER_BTC_PUBLIC_ADDRESS", "")
         st.text_input("Wallet BTC publica", value=btc_address, disabled=True)
         st.caption("Solo referencia publica. No se solicitan ni guardan llaves privadas.")
@@ -603,7 +790,7 @@ def main() -> None:
     )
 
     with tab_setup:
-        render_setup_tab(config, btc_address, public_paypal_handle)
+        render_setup_tab(paypal, stripe, btc_address, public_paypal_handle)
 
     with tab_build:
         col_left, col_right = st.columns([0.9, 1.1], gap="large")
@@ -651,7 +838,8 @@ def main() -> None:
                 st.success("Producto publicado en el catalogo local.")
 
     with tab_landing:
-        capture_return_if_needed(product_dict, config)
+        capture_stripe_return_if_needed(product_dict, stripe)
+        capture_return_if_needed(product_dict, paypal)
         st.subheader(product.title)
         st.write(product.subtitle)
         st.write("**Problema que resuelve**")
@@ -672,11 +860,30 @@ def main() -> None:
         st.divider()
         st.metric("Precio", f"${product.price_usd:.2f} USD")
 
-        if config.is_configured:
-            if st.button("Crear checkout PayPal", type="primary", width="stretch"):
+        if stripe.is_configured:
+            if st.button("Crear checkout Stripe", type="primary", width="stretch"):
+                with st.spinner("Creando checkout Stripe..."):
+                    try:
+                        session = create_checkout_session(stripe, product_dict)
+                        record_pending_stripe_session(session["id"], product_dict)
+                        st.session_state["last_stripe_session"] = session
+                        st.success("Checkout creado. Abre Stripe para completar el pago.")
+                    except Exception as exc:
+                        st.error(f"No se pudo crear el checkout Stripe: {exc}")
+            stripe_session = st.session_state.get("last_stripe_session")
+            if stripe_session:
+                st.link_button("Pagar con Stripe", stripe_session["url"], width="stretch")
+        else:
+            st.warning("Configura STRIPE_SECRET_KEY en Streamlit Secrets para activar el checkout principal.")
+
+        st.divider()
+        st.caption("PayPal queda disponible como respaldo o para pagos manuales verificados.")
+
+        if paypal.is_configured:
+            if st.button("Crear checkout PayPal", width="stretch"):
                 with st.spinner("Creando orden PayPal..."):
                     try:
-                        order = create_order(config, product_dict)
+                        order = create_order(paypal, product_dict)
                         record_pending_order(order["id"], product_dict)
                         st.session_state["last_paypal_order"] = order
                         st.success("Orden creada. Abre PayPal para completar el pago.")
@@ -701,11 +908,11 @@ def main() -> None:
                     "Usalo solo mientras configuras credenciales API de PayPal."
                 )
 
-        st.info("Despues del retorno de PayPal, la app captura la orden y habilita la descarga del PDF.")
+        st.info("Despues del retorno de Stripe o PayPal, la app verifica el pago y habilita la descarga del PDF.")
 
     with tab_sales:
         df = sales_frame()
-        pending_df = pending_orders_frame()
+        pending_df = pending_payments_frame()
         summary = revenue_summary()
         gross = float(summary["gross"])
         net_estimate = float(summary["net_estimate"])
@@ -716,7 +923,7 @@ def main() -> None:
         col3.metric("Neto estimado", f"${net_estimate:.2f} USD")
         col4.metric("Equivalente BTC", f"{(gross / rate if rate else 0):.8f}")
         col5.metric("Conversion checkout", f"{float(summary['conversion']):.1f}%")
-        st.caption("Neto estimado usa una aproximacion de comisiones PayPal; confirma cifras finales en PayPal.")
+        st.caption("Neto estimado usa una aproximacion de comisiones de pasarela; confirma cifras finales en Stripe/PayPal.")
         if not df.empty:
             best = df.groupby("product_title")["amount_usd"].agg(["count", "sum"]).reset_index()
             best = best.sort_values(["count", "sum"], ascending=False)
@@ -767,7 +974,7 @@ def main() -> None:
         st.write("Sugerencia manual")
         if btc_address:
             st.write(
-                "Cuando PayPal liquide tus fondos, puedes convertir manualmente parte del saldo a BTC "
+                "Cuando Stripe o PayPal liquiden tus fondos, puedes convertir manualmente parte del saldo a BTC "
                 "en un exchange de tu eleccion y retirar a la direccion publica configurada."
             )
         else:
@@ -799,7 +1006,8 @@ def main() -> None:
     with tab_admin:
         st.subheader("Panel administrativo")
         st.write("Metodos de pago")
-        st.write("PayPal API:", "configurado" if config.is_configured else "pendiente")
+        st.write("Stripe Checkout:", "configurado" if stripe.is_configured else "pendiente")
+        st.write("PayPal API:", "configurado" if paypal.is_configured else "pendiente")
         st.write("PayPal publico:", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
         st.write("Bitcoin:", "direccion publica configurada" if btc_address else "pendiente")
         product_df = products_frame()
@@ -842,7 +1050,7 @@ def main() -> None:
                                     manual_order_id,
                                     selected_product,
                                     manual_email,
-                                    config,
+                                    paypal,
                                 )
                                 st.success("Pago manual registrado y entrega generada.")
                                 st.code(download_url, language="text")
@@ -854,7 +1062,7 @@ def main() -> None:
                             except Exception as exc:
                                 st.error(f"No se pudo registrar el pago manual: {exc}")
         st.write("Pagos pendientes")
-        st.dataframe(pending_orders_frame(), width="stretch", hide_index=True)
+        st.dataframe(pending_payments_frame(), width="stretch", hide_index=True)
         st.write("Logs de auditoria")
         st.dataframe(audit_frame(), width="stretch", hide_index=True)
 

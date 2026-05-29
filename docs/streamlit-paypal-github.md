@@ -1,4 +1,4 @@
-# Streamlit + GitHub + PayPal deployment
+# Streamlit + GitHub + Stripe/PayPal deployment
 
 This project now includes a Streamlit-native entrypoint:
 
@@ -14,6 +14,7 @@ It is separate from the existing Next.js app. Streamlit Community Cloud deploys 
 - `requirements.txt` - Python dependencies Streamlit installs.
 - `.streamlit/config.toml` - theme and server settings.
 - `.streamlit/secrets.toml.example` - template only; never commit real secrets.
+- `streamlit_src/stripe_checkout.py` - Stripe Checkout Session helpers.
 - `streamlit_src/paypal.py` - PayPal order create/capture helpers.
 - `streamlit_src/product_engine.py` - product, niche, landing, and marketing generation.
 - `streamlit_src/pdf_delivery.py` - PDF export.
@@ -61,6 +62,7 @@ Paste this into Streamlit Cloud > App > Settings > Secrets, replacing the values
 ```toml
 # Optional. If blank, the app detects its public Streamlit URL automatically.
 APP_BASE_URL = ""
+STRIPE_SECRET_KEY = "sk_test_replace_me"
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
@@ -70,18 +72,19 @@ RESEND_API_KEY = ""
 EMAIL_FROM = "AI Digital Product Money Machine <onboarding@resend.dev>"
 ```
 
-Use `sandbox` first. Switch `PAYPAL_MODE` to `live` only after a successful test purchase.
+Use Stripe test mode first. For PayPal, use `sandbox` first and switch `PAYPAL_MODE` to `live` only after a successful test purchase.
 
-`APP_BASE_URL` is only needed when you want to force a custom return URL. Otherwise, the app uses Streamlit's runtime URL as the PayPal return/cancel base.
+`APP_BASE_URL` is only needed when you want to force a custom return URL. Otherwise, the app uses Streamlit's runtime URL as the Stripe and PayPal return/cancel base.
 
 After the app is deployed, open the **Setup** tab. It shows the same GitHub file URL,
-the secrets template, the detected PayPal return URL, and a **Probar conexion PayPal**
-button that validates the PayPal credentials without displaying them.
+the secrets template, the detected return URL, and **Probar conexion Stripe** /
+**Probar conexion PayPal** buttons that validate credentials without displaying them.
 
 The deployed Streamlit app also includes:
 
 - Product draft/publish persistence in local SQLite.
-- Unique expiring download links after PayPal capture.
+- Stripe Checkout as the primary payment flow.
+- Unique expiring download links after Stripe verification or PayPal capture.
 - Basic receipt download after payment confirmation.
 - Optional confirmation email through Resend when `RESEND_API_KEY` and `EMAIL_FROM` are configured.
 - Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, checkout conversion, customers, pending payments, completed payments, CSV export, and financial JSON export.
@@ -90,6 +93,17 @@ The deployed Streamlit app also includes:
 - Manual verified payment registration from Admin for PayPal public-handle payments.
 - Marketing tab with social/email/WhatsApp copy, A/B headline/CTA variants, and a simple content calendar.
 - Optional PayPal public handle fallback (`PAYPAL_PUBLIC_HANDLE`) for manual payments while API credentials are pending. Manual payments do not unlock automatic delivery.
+
+## Stripe setup
+
+The app uses Stripe Checkout Sessions for one-time digital product payments:
+
+1. Create a server-side Checkout Session.
+2. Send the buyer to Stripe-hosted checkout.
+3. When the buyer returns, retrieve the Checkout Session from Stripe.
+4. Release the PDF only if `payment_status` is `paid`.
+
+Keep `STRIPE_SECRET_KEY` in Streamlit Secrets. Do not paste it into chat or commit it.
 
 ## PayPal setup
 
@@ -104,7 +118,7 @@ Official PayPal Checkout guidance describes this backend flow: create an order, 
 
 ## Security
 
-- Do not paste PayPal secrets into chat.
+- Do not paste Stripe or PayPal secrets into chat.
 - Do not commit `.streamlit/secrets.toml`.
 - The app does not store cards, bank details, BTC private keys, seed phrases, or wallet passwords.
 - BTC wallet support is display/reference only.
@@ -117,10 +131,11 @@ python -m pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-For local PayPal tests, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in sandbox credentials. Local tests default the PayPal return URL to `http://localhost:8501` when `APP_BASE_URL` is blank.
+For local payment tests, copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and fill in Stripe test and PayPal sandbox credentials. Local tests default the return URL to `http://localhost:8501` when `APP_BASE_URL` is blank.
 
 ## Sources
 
 - Streamlit deploy docs: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app
 - Streamlit secrets docs: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management
+- Stripe Checkout Sessions API: https://docs.stripe.com/api/checkout/sessions
 - PayPal Checkout integration: https://developer.paypal.com/studio/checkout/standard/integrate

@@ -10,7 +10,7 @@ La app esta disenada para ventas legitimas. No crea dinero de la nada, no hace p
 - Tailwind CSS
 - Prisma + PostgreSQL
 - Stripe Checkout Sessions
-- Streamlit deploy target with PayPal Checkout REST flow
+- Streamlit deploy target with Stripe Checkout plus PayPal fallback
 - Resend via API HTTP
 - PDF generado en servidor
 - API BTC/USD de CoinGecko con fallback
@@ -35,7 +35,7 @@ Abre `http://localhost:3000`. El usuario admin se configura con `ADMIN_EMAIL` y 
 
 La app funciona en modo demo si faltan Stripe/Postgres/Resend, pero los pagos reales y persistencia requieren esas variables.
 
-## Streamlit + PayPal
+## Streamlit + Stripe/PayPal
 
 Tambien existe una version deployable en Streamlit:
 
@@ -58,11 +58,13 @@ Tambien puedes usar "Paste GitHub URL" en Streamlit con:
 https://github.com/miguellponcej/QuinielaMx/blob/ai-money-machine-streamlit/streamlit_app.py
 ```
 
-Configura `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio. `APP_BASE_URL` es opcional; si queda vacio, la app detecta la URL publica de Streamlit para el retorno de PayPal.
+Configura `STRIPE_SECRET_KEY`, `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio. `APP_BASE_URL` es opcional; si queda vacio, la app detecta la URL publica de Streamlit para el retorno de Stripe y PayPal.
 
-Despues del deploy, abre la pestana `Setup` dentro de la app para validar que PayPal, la URL de retorno y la wallet publica quedaron configuradas.
+Despues del deploy, abre la pestana `Setup` dentro de la app para validar que Stripe, PayPal, la URL de retorno y la wallet publica quedaron configuradas.
 
 La version Streamlit incluye persistencia local de productos, publicacion/borradores, links de descarga unicos con expiracion, recibo basico descargable, panel de ventas con neto estimado, conversion checkout, productos mas vendidos, clientes, pagos pendientes/completados, reporte financiero JSON, panel Wallet BTC con sugerencia manual, calendario de marketing y panel Admin basico.
+
+`STRIPE_SECRET_KEY` activa el checkout principal con Stripe Checkout Sessions. La app verifica la sesion al volver de Stripe y solo libera el PDF si `payment_status` viene como pagado.
 
 `PAYPAL_PUBLIC_HANDLE` puede quedar como `miguellponcej` para mostrar un fallback de pago manual. Para checkout y entrega automatica siguen siendo necesarias las credenciales API de PayPal.
 
@@ -72,7 +74,7 @@ Si usas el fallback manual de PayPal, confirma primero el pago en PayPal y luego
 
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
-## Stripe
+## Stripe en Next.js
 
 La integracion usa Checkout Sessions para pagos de una sola vez. No se almacenan tarjetas ni datos bancarios sensibles. Configura el webhook de Stripe hacia:
 
