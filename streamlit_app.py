@@ -392,6 +392,24 @@ def audit_frame() -> pd.DataFrame:
         return pd.read_sql_query("select * from audit_logs order by created_at desc limit 100", conn)
 
 
+def revenue_summary() -> dict[str, float | int]:
+    df = sales_frame()
+    pending_df = pending_orders_frame()
+    gross = float(df["amount_usd"].sum()) if not df.empty else 0.0
+    completed = int(len(df))
+    pending = int(len(pending_df))
+    attempts = completed + pending
+    conversion = (completed / attempts * 100.0) if attempts else 0.0
+    net_estimate = max(gross - (gross * 0.0349) - (completed * 0.49), 0.0) if gross else 0.0
+    return {
+        "gross": gross,
+        "net_estimate": net_estimate,
+        "completed": completed,
+        "pending": pending,
+        "conversion": conversion,
+    }
+
+
 def btc_rate_usd() -> float:
     try:
         response = requests.get(
@@ -565,8 +583,8 @@ def main() -> None:
         st.text_input("Wallet BTC publica", value=btc_address, disabled=True)
         st.caption("Solo referencia publica. No se solicitan ni guardan llaves privadas.")
 
-    tab_setup, tab_build, tab_landing, tab_sales, tab_marketing, tab_admin = st.tabs(
-        ["Setup", "Producto", "Landing y checkout", "Ventas", "Marketing", "Admin"]
+    tab_setup, tab_build, tab_landing, tab_sales, tab_wallet, tab_marketing, tab_admin = st.tabs(
+        ["Setup", "Producto", "Landing y checkout", "Ventas", "Wallet BTC", "Marketing", "Admin"]
     )
 
     with tab_setup:
@@ -673,14 +691,16 @@ def main() -> None:
     with tab_sales:
         df = sales_frame()
         pending_df = pending_orders_frame()
-        gross = float(df["amount_usd"].sum()) if not df.empty else 0.0
-        net_estimate = max(gross - (gross * 0.0349) - (len(df) * 0.49), 0.0) if gross else 0.0
+        summary = revenue_summary()
+        gross = float(summary["gross"])
+        net_estimate = float(summary["net_estimate"])
         rate = btc_rate_usd()
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("Ventas registradas", str(len(df)))
+        col1, col2, col3, col4, col5 = st.columns(5)
+        col1.metric("Ventas registradas", str(summary["completed"]))
         col2.metric("Ingresos brutos", f"${gross:.2f} USD")
         col3.metric("Neto estimado", f"${net_estimate:.2f} USD")
         col4.metric("Equivalente BTC", f"{(gross / rate if rate else 0):.8f}")
+        col5.metric("Conversion checkout", f"{float(summary['conversion']):.1f}%")
         st.caption("Neto estimado usa una aproximacion de comisiones PayPal; confirma cifras finales en PayPal.")
         if not df.empty:
             best = df.groupby("product_title")["amount_usd"].agg(["count", "sum"]).reset_index()
@@ -697,6 +717,48 @@ def main() -> None:
             file_name="sales-report.csv",
             mime="text/csv",
             width="stretch",
+        )
+        report_payload = {
+            "generated_at": now_utc(),
+            "gross_usd": gross,
+            "net_estimate_usd": net_estimate,
+            "btc_usd_rate": rate,
+            "gross_btc_estimate": gross / rate if rate else 0,
+            "completed_payments": summary["completed"],
+            "pending_payments": summary["pending"],
+            "checkout_conversion_percent": summary["conversion"],
+        }
+        st.download_button(
+            "Exportar reporte financiero JSON",
+            data=json.dumps(report_payload, indent=2),
+            file_name="financial-report.json",
+            mime="application/json",
+            width="stretch",
+        )
+
+    with tab_wallet:
+        summary = revenue_summary()
+        gross = float(summary["gross"])
+        net_estimate = float(summary["net_estimate"])
+        rate = btc_rate_usd()
+        btc_gross = gross / rate if rate else 0.0
+        btc_net = net_estimate / rate if rate else 0.0
+        st.subheader("Wallet publica de Bitcoin")
+        st.text_input("Direccion publica BTC", value=btc_address, disabled=True)
+        st.metric("Ingresos brutos acumulados", f"${gross:.2f} USD")
+        st.metric("Equivalente bruto estimado", f"{btc_gross:.8f} BTC")
+        st.metric("Equivalente neto estimado", f"{btc_net:.8f} BTC")
+        st.caption(f"Tipo de cambio BTC/USD usado: ${rate:,.2f}. Es una estimacion, no una orden de conversion.")
+        st.write("Sugerencia manual")
+        if btc_address:
+            st.write(
+                "Cuando PayPal liquide tus fondos, puedes convertir manualmente parte del saldo a BTC "
+                "en un exchange de tu eleccion y retirar a la direccion publica configurada."
+            )
+        else:
+            st.warning("Configura OWNER_BTC_PUBLIC_ADDRESS en Streamlit Secrets para mostrar el destino publico.")
+        st.info(
+            "La app no mueve fondos, no hace trading automatico y nunca solicita private keys, seed phrases ni passwords."
         )
 
     with tab_marketing:
@@ -721,6 +783,10 @@ def main() -> None:
 
     with tab_admin:
         st.subheader("Panel administrativo")
+        st.write("Metodos de pago")
+        st.write("PayPal API:", "configurado" if config.is_configured else "pendiente")
+        st.write("PayPal publico:", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
+        st.write("Bitcoin:", "direccion publica configurada" if btc_address else "pendiente")
         product_df = products_frame()
         st.write("Productos guardados")
         st.dataframe(product_df, width="stretch", hide_index=True)
