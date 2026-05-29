@@ -38,6 +38,20 @@ class ProductDraft:
         return asdict(self)
 
 
+def product_from_dict(value: dict[str, Any]) -> ProductDraft:
+    return ProductDraft(
+        niche=str(value["niche"]),
+        product_type=str(value["product_type"]),
+        title=str(value["title"]),
+        subtitle=str(value["subtitle"]),
+        description=str(value["description"]),
+        price_usd=float(value["price_usd"]),
+        sales_bullets=list(value["sales_bullets"]),
+        table_of_contents=list(value["table_of_contents"]),
+        sections=list(value["sections"]),
+    )
+
+
 def slugify(value: str) -> str:
     value = value.lower().strip()
     value = re.sub(r"[^a-z0-9]+", "-", value)

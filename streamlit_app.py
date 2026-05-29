@@ -12,7 +12,7 @@ import streamlit as st
 
 from streamlit_src.paypal import PayPalConfig, capture_order, create_order
 from streamlit_src.pdf_delivery import product_pdf_bytes
-from streamlit_src.product_engine import analyze_niche, generate_product, marketing_assets
+from streamlit_src.product_engine import analyze_niche, generate_product, marketing_assets, product_from_dict
 
 
 APP_NAME = "AI Digital Product Money Machine"
@@ -47,6 +47,44 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            create table if not exists pending_orders (
+                paypal_order_id text primary key,
+                product_slug text not null,
+                product_json text not null,
+                created_at text not null
+            )
+            """
+        )
+
+
+def record_pending_order(order_id: str, product: dict[str, Any]) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            insert or replace into pending_orders (
+                paypal_order_id, product_slug, product_json, created_at
+            ) values (?, ?, ?, ?)
+            """,
+            (
+                order_id,
+                product["slug"],
+                json.dumps(product, ensure_ascii=False),
+                datetime.now(timezone.utc).isoformat(),
+            ),
+        )
+
+
+def pending_product_for_order(order_id: str) -> dict[str, Any] | None:
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "select product_json from pending_orders where paypal_order_id = ?",
+            (order_id,),
+        ).fetchone()
+    if not row:
+        return None
+    return json.loads(row[0])
 
 
 def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[str, Any]) -> None:
@@ -120,13 +158,14 @@ def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> b
 
     with st.spinner("Confirmando pago con PayPal..."):
         try:
+            purchased_product = pending_product_for_order(str(token)) or product
             payload = capture_order(config, str(token))
-            record_sale(str(token), product, payload)
+            record_sale(str(token), purchased_product, payload)
             st.success("Pago confirmado. Tu descarga esta lista.")
             st.download_button(
                 "Descargar PDF comprado",
-                data=product_pdf_bytes(generate_product(product["niche"])),
-                file_name=f"{product['slug']}.pdf",
+                data=product_pdf_bytes(product_from_dict(purchased_product)),
+                file_name=f"{purchased_product['slug']}.pdf",
                 mime="application/pdf",
                 width="stretch",
             )
@@ -208,6 +247,7 @@ def main() -> None:
                 with st.spinner("Creando orden PayPal..."):
                     try:
                         order = create_order(config, product_dict)
+                        record_pending_order(order["id"], product_dict)
                         st.session_state["last_paypal_order"] = order
                         st.success("Orden creada. Abre PayPal para completar el pago.")
                     except Exception as exc:
