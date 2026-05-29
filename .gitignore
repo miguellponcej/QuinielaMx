@@ -1,0 +1,15 @@
+.env
+.env.local
+.streamlit/secrets.toml
+.venv
+.next
+node_modules
+__pycache__
+*.pyc
+coverage
+dist
+*.log
+*.tsbuildinfo
+prisma/dev.db
+data/*.db
+tmp
