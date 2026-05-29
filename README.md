@@ -64,6 +64,8 @@ Despues del deploy, abre la pestana `Setup` dentro de la app para validar que Pa
 
 La version Streamlit incluye persistencia local de productos, publicacion/borradores, links de descarga unicos con expiracion, recibo basico descargable, panel de ventas con neto estimado, productos mas vendidos, clientes, pagos pendientes/completados, calendario de marketing y panel Admin basico.
 
+`PAYPAL_PUBLIC_HANDLE` puede quedar como `miguellponcej` para mostrar un fallback de pago manual. Para checkout y entrega automatica siguen siendo necesarias las credenciales API de PayPal.
+
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
 ## Stripe

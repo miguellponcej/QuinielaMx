@@ -64,6 +64,7 @@ APP_BASE_URL = ""
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
+PAYPAL_PUBLIC_HANDLE = "miguellponcej"
 OWNER_BTC_PUBLIC_ADDRESS = "your-public-btc-address"
 ```
 
@@ -83,6 +84,7 @@ The deployed Streamlit app also includes:
 - Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, customers, pending payments, completed payments, and CSV export.
 - Admin tab for product price updates, delete actions, pending orders, and audit logs.
 - Marketing tab with social/email/WhatsApp copy, A/B headline/CTA variants, and a simple content calendar.
+- Optional PayPal public handle fallback (`PAYPAL_PUBLIC_HANDLE`) for manual payments while API credentials are pending. Manual payments do not unlock automatic delivery.
 
 ## PayPal setup
 

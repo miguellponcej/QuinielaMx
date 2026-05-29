@@ -29,6 +29,7 @@ SECRETS_TEMPLATE = """APP_BASE_URL = ""
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
 PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
+PAYPAL_PUBLIC_HANDLE = "miguellponcej"
 OWNER_BTC_PUBLIC_ADDRESS = "your-public-btc-address"
 """
 
@@ -371,6 +372,11 @@ def paypal_config() -> PayPalConfig:
     )
 
 
+def paypal_public_handle() -> str:
+    handle = secret("PAYPAL_PUBLIC_HANDLE", "miguellponcej").strip()
+    return handle.lstrip("@")
+
+
 def render_security_notice() -> None:
     st.info(
         "Venta legitima: PayPal procesa el pago. Esta app no guarda tarjetas, cuentas bancarias, "
@@ -391,7 +397,7 @@ def missing_setup_items(config: PayPalConfig, btc_address: str) -> list[str]:
     return missing
 
 
-def render_setup_tab(config: PayPalConfig, btc_address: str) -> None:
+def render_setup_tab(config: PayPalConfig, btc_address: str, public_paypal_handle: str) -> None:
     st.subheader("Setup de Streamlit, GitHub y PayPal")
     st.write("Usa estos datos para levantar la app en Streamlit Cloud desde tu GitHub.")
     col_a, col_b = st.columns(2)
@@ -410,10 +416,11 @@ def render_setup_tab(config: PayPalConfig, btc_address: str) -> None:
         st.success("Los secretos basicos estan presentes.")
 
     st.write("Estado detectado")
-    status_col_1, status_col_2, status_col_3 = st.columns(3)
+    status_col_1, status_col_2, status_col_3, status_col_4 = st.columns(4)
     status_col_1.metric("PayPal", "listo" if config.is_configured else "pendiente")
     status_col_2.metric("Modo", config.mode)
     status_col_3.metric("Wallet BTC", "lista" if btc_address.strip() else "pendiente")
+    status_col_4.metric("PayPal publico", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
     st.caption(f"URL de retorno PayPal detectada: {config.app_base_url}")
 
     if st.button("Probar conexion PayPal", width="stretch"):
@@ -495,6 +502,7 @@ def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> b
 def main() -> None:
     init_db()
     config = paypal_config()
+    public_paypal_handle = paypal_public_handle()
 
     st.title(APP_NAME)
     st.caption("Crea, publica, cobra con PayPal y entrega productos digitales reales.")
@@ -505,6 +513,7 @@ def main() -> None:
         st.header("Configuracion")
         st.write("PayPal:", "configurado" if config.is_configured else "pendiente")
         st.write("Modo:", config.mode)
+        st.write("PayPal publico:", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
         st.caption(f"Retorno PayPal: {config.app_base_url}")
         btc_address = secret("OWNER_BTC_PUBLIC_ADDRESS", "")
         st.text_input("Wallet BTC publica", value=btc_address, disabled=True)
@@ -515,7 +524,7 @@ def main() -> None:
     )
 
     with tab_setup:
-        render_setup_tab(config, btc_address)
+        render_setup_tab(config, btc_address, public_paypal_handle)
 
     with tab_build:
         col_left, col_right = st.columns([0.9, 1.1], gap="large")
@@ -602,6 +611,16 @@ def main() -> None:
                 "Configura PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET y PAYPAL_MODE "
                 "en Streamlit Secrets para activar cobros reales."
             )
+            if public_paypal_handle:
+                st.link_button(
+                    f"Pago manual por PayPal @{public_paypal_handle}",
+                    f"https://www.paypal.me/{public_paypal_handle}",
+                    width="stretch",
+                )
+                st.caption(
+                    "Pago manual no confirma automaticamente la orden ni libera descarga. "
+                    "Usalo solo mientras configuras credenciales API de PayPal."
+                )
 
         st.info("Despues del retorno de PayPal, la app captura la orden y habilita la descarga del PDF.")
 
