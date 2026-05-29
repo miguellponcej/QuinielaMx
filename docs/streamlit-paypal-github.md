@@ -71,6 +71,10 @@ Use `sandbox` first. Switch `PAYPAL_MODE` to `live` only after a successful test
 
 `APP_BASE_URL` is only needed when you want to force a custom return URL. Otherwise, the app uses Streamlit's runtime URL as the PayPal return/cancel base.
 
+After the app is deployed, open the **Setup** tab. It shows the same GitHub file URL,
+the secrets template, the detected PayPal return URL, and a **Probar conexion PayPal**
+button that validates the PayPal credentials without displaying them.
+
 ## PayPal setup
 
 The app uses PayPal Orders API flow:

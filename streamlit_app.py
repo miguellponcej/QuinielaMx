@@ -12,13 +12,24 @@ import pandas as pd
 import requests
 import streamlit as st
 
-from streamlit_src.paypal import PayPalConfig, capture_order, create_order
+from streamlit_src.paypal import PayPalConfig, capture_order, create_order, paypal_access_token
 from streamlit_src.pdf_delivery import product_pdf_bytes
 from streamlit_src.product_engine import analyze_niche, generate_product, marketing_assets, product_from_dict
 
 
 APP_NAME = "AI Digital Product Money Machine"
 DB_PATH = Path("data/streamlit_sales.db")
+DEPLOY_FILE_URL = (
+    "https://github.com/miguellponcej/QuinielaMx/blob/"
+    "ai-money-machine-streamlit/streamlit_app.py"
+)
+GITHUB_BRANCH_URL = "https://github.com/miguellponcej/QuinielaMx/tree/ai-money-machine-streamlit"
+SECRETS_TEMPLATE = """APP_BASE_URL = ""
+PAYPAL_MODE = "sandbox"
+PAYPAL_CLIENT_ID = "your-paypal-client-id"
+PAYPAL_CLIENT_SECRET = "your-paypal-client-secret"
+OWNER_BTC_PUBLIC_ADDRESS = "your-public-btc-address"
+"""
 
 
 st.set_page_config(page_title=APP_NAME, page_icon="💼", layout="wide")
@@ -170,6 +181,56 @@ def render_security_notice() -> None:
     )
 
 
+def missing_setup_items(config: PayPalConfig, btc_address: str) -> list[str]:
+    missing = []
+    if not config.client_id.strip() or config.client_id.startswith(("replace", "your-")):
+        missing.append("PAYPAL_CLIENT_ID")
+    if not config.client_secret.strip() or config.client_secret.startswith(("replace", "your-")):
+        missing.append("PAYPAL_CLIENT_SECRET")
+    if config.mode not in {"sandbox", "live"}:
+        missing.append("PAYPAL_MODE debe ser sandbox o live")
+    if not btc_address.strip() or btc_address.startswith(("replace", "your-")):
+        missing.append("OWNER_BTC_PUBLIC_ADDRESS")
+    return missing
+
+
+def render_setup_tab(config: PayPalConfig, btc_address: str) -> None:
+    st.subheader("Setup de Streamlit, GitHub y PayPal")
+    st.write("Usa estos datos para levantar la app en Streamlit Cloud desde tu GitHub.")
+    col_a, col_b = st.columns(2)
+    col_a.link_button("Abrir archivo para Streamlit", DEPLOY_FILE_URL, width="stretch")
+    col_b.link_button("Abrir rama en GitHub", GITHUB_BRANCH_URL, width="stretch")
+    st.code(DEPLOY_FILE_URL, language="text")
+
+    st.write("Pega esta plantilla en Streamlit Cloud > App > Settings > Secrets.")
+    st.code(SECRETS_TEMPLATE, language="toml")
+    st.caption("APP_BASE_URL puede quedar vacio; la app detecta su URL publica para el retorno de PayPal.")
+
+    missing = missing_setup_items(config, btc_address)
+    if missing:
+        st.warning("Configuracion pendiente: " + ", ".join(missing))
+    else:
+        st.success("Los secretos basicos estan presentes.")
+
+    st.write("Estado detectado")
+    status_col_1, status_col_2, status_col_3 = st.columns(3)
+    status_col_1.metric("PayPal", "listo" if config.is_configured else "pendiente")
+    status_col_2.metric("Modo", config.mode)
+    status_col_3.metric("Wallet BTC", "lista" if btc_address.strip() else "pendiente")
+    st.caption(f"URL de retorno PayPal detectada: {config.app_base_url}")
+
+    if st.button("Probar conexion PayPal", width="stretch"):
+        if not config.is_configured:
+            st.error("Agrega PAYPAL_CLIENT_ID y PAYPAL_CLIENT_SECRET en Streamlit Secrets antes de probar.")
+        else:
+            with st.spinner("Probando credenciales con PayPal..."):
+                try:
+                    paypal_access_token(config)
+                    st.success("PayPal respondio correctamente. El checkout puede crear ordenes.")
+                except Exception as exc:
+                    st.error(f"PayPal no respondio con esas credenciales: {exc}")
+
+
 def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> bool:
     params = st.query_params
     token = params.get("token")
@@ -217,9 +278,12 @@ def main() -> None:
         st.text_input("Wallet BTC publica", value=btc_address, disabled=True)
         st.caption("Solo referencia publica. No se solicitan ni guardan llaves privadas.")
 
-    tab_build, tab_landing, tab_sales, tab_marketing = st.tabs(
-        ["Producto", "Landing y checkout", "Ventas", "Marketing"]
+    tab_setup, tab_build, tab_landing, tab_sales, tab_marketing = st.tabs(
+        ["Setup", "Producto", "Landing y checkout", "Ventas", "Marketing"]
     )
+
+    with tab_setup:
+        render_setup_tab(config, btc_address)
 
     with tab_build:
         col_left, col_right = st.columns([0.9, 1.1], gap="large")
@@ -283,7 +347,7 @@ def main() -> None:
                 st.link_button("Pagar con PayPal", order["approval_url"], width="stretch")
         else:
             st.warning(
-                "Configura PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET, PAYPAL_MODE y APP_BASE_URL "
+                "Configura PAYPAL_CLIENT_ID, PAYPAL_CLIENT_SECRET y PAYPAL_MODE "
                 "en Streamlit Secrets para activar cobros reales."
             )
 
