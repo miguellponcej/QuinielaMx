@@ -20,7 +20,14 @@ It is separate from the existing Next.js app. Streamlit Community Cloud deploys 
 
 ## Streamlit Cloud setup
 
-1. Push this repository to GitHub.
+1. Use the GitHub branch already pushed for this app:
+
+```text
+Repository: miguellponcej/QuinielaMx
+Branch: ai-money-machine-streamlit
+Main file path: streamlit_app.py
+```
+
 2. Open Streamlit Community Cloud.
 3. Create a new app from the GitHub repo.
 4. Set the main file path to:
@@ -31,7 +38,7 @@ streamlit_app.py
 
 5. Add secrets in Streamlit app settings using the values below.
 
-If the GitHub repository does not exist yet, create an empty repo under your account, then run this from the project folder:
+This branch was pushed without changing `QuinielaMx/main`. If you later create a dedicated empty repo under your account, run this from the project folder:
 
 ```powershell
 .\scripts\push-to-github.ps1 -RepositoryUrl "https://github.com/miguellponcej/REPO_NAME.git"

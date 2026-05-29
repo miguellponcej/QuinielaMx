@@ -44,7 +44,15 @@ python -m pip install -r requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Para Streamlit Community Cloud, sube el repo a GitHub y selecciona `streamlit_app.py` como archivo principal. Configura `APP_BASE_URL`, `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio.
+Para Streamlit Community Cloud, usa:
+
+```text
+Repository: miguellponcej/QuinielaMx
+Branch: ai-money-machine-streamlit
+Main file path: streamlit_app.py
+```
+
+Configura `APP_BASE_URL`, `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC_PUBLIC_ADDRESS` en Streamlit Secrets, no en el repositorio.
 
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
