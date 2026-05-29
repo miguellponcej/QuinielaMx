@@ -62,6 +62,8 @@ Configura `PAYPAL_MODE`, `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` y `OWNER_BTC
 
 Despues del deploy, abre la pestana `Setup` dentro de la app para validar que PayPal, la URL de retorno y la wallet publica quedaron configuradas.
 
+La version Streamlit incluye persistencia local de productos, publicacion/borradores, links de descarga unicos con expiracion, recibo basico descargable, panel de ventas con neto estimado, productos mas vendidos, clientes, pagos pendientes/completados, calendario de marketing y panel Admin basico.
+
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
 ## Stripe

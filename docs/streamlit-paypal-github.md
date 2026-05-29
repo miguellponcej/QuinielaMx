@@ -75,6 +75,15 @@ After the app is deployed, open the **Setup** tab. It shows the same GitHub file
 the secrets template, the detected PayPal return URL, and a **Probar conexion PayPal**
 button that validates the PayPal credentials without displaying them.
 
+The deployed Streamlit app also includes:
+
+- Product draft/publish persistence in local SQLite.
+- Unique expiring download links after PayPal capture.
+- Basic receipt download after payment confirmation.
+- Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, customers, pending payments, completed payments, and CSV export.
+- Admin tab for product price updates, delete actions, pending orders, and audit logs.
+- Marketing tab with social/email/WhatsApp copy, A/B headline/CTA variants, and a simple content calendar.
+
 ## PayPal setup
 
 The app uses PayPal Orders API flow:
