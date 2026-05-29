@@ -87,6 +87,7 @@ The deployed Streamlit app also includes:
 - Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, checkout conversion, customers, pending payments, completed payments, CSV export, and financial JSON export.
 - Wallet BTC tab with public address, accumulated revenue, BTC estimate, and manual conversion guidance.
 - Admin tab for product price updates, delete actions, pending orders, and audit logs.
+- Manual verified payment registration from Admin for PayPal public-handle payments.
 - Marketing tab with social/email/WhatsApp copy, A/B headline/CTA variants, and a simple content calendar.
 - Optional PayPal public handle fallback (`PAYPAL_PUBLIC_HANDLE`) for manual payments while API credentials are pending. Manual payments do not unlock automatic delivery.
 

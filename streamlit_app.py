@@ -265,6 +265,21 @@ def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[st
     log_event("capture", "payment", order_id, {"product_slug": product["slug"]})
 
 
+def confirm_manual_payment(order_id: str, product: dict[str, Any], customer_email: str, config: PayPalConfig) -> tuple[str, str, bool]:
+    payload = {
+        "status": "MANUAL_CONFIRMED",
+        "provider": "paypal_manual",
+        "payer": {"email_address": customer_email},
+        "verified_by": "admin",
+    }
+    record_sale(order_id, product, payload)
+    download_token, expires_at = create_download_link(order_id, product)
+    download_url = f"{config.app_base_url}?download_token={download_token}"
+    email_sent = send_delivery_email(customer_email, product, download_url, order_id)
+    log_event("confirm", "manual_payment", order_id, {"product_slug": product["slug"], "email_sent": email_sent})
+    return download_url, expires_at, email_sent
+
+
 def create_download_link(order_id: str, product: dict[str, Any]) -> tuple[str, str]:
     token = token_secrets.token_urlsafe(24)
     expires_at = datetime.now(timezone.utc) + timedelta(hours=48)
@@ -808,6 +823,36 @@ def main() -> None:
                 if col_delete.button("Eliminar producto", width="stretch"):
                     delete_product(selected_slug)
                     st.warning("Producto eliminado.")
+                with st.expander("Registrar pago manual verificado"):
+                    manual_email = st.text_input("Email del comprador", key="manual_payment_email")
+                    manual_order_id = st.text_input(
+                        "ID de transaccion PayPal verificada",
+                        key="manual_payment_order_id",
+                        placeholder="PAYPAL-TXN-...",
+                    )
+                    st.caption(
+                        "Usa esto solo despues de confirmar el pago en PayPal. Genera link unico, recibo y email opcional."
+                    )
+                    if st.button("Confirmar pago manual y generar entrega", type="primary", width="stretch"):
+                        if not manual_email or not manual_order_id:
+                            st.error("Ingresa email del comprador e ID de transaccion PayPal.")
+                        else:
+                            try:
+                                download_url, expires_at, email_sent = confirm_manual_payment(
+                                    manual_order_id,
+                                    selected_product,
+                                    manual_email,
+                                    config,
+                                )
+                                st.success("Pago manual registrado y entrega generada.")
+                                st.code(download_url, language="text")
+                                st.caption(f"Link valido hasta {expires_at} UTC o 3 descargas.")
+                                if email_sent:
+                                    st.info("Correo enviado al comprador.")
+                                else:
+                                    st.info("Correo no enviado: comparte el link manualmente o configura Resend.")
+                            except Exception as exc:
+                                st.error(f"No se pudo registrar el pago manual: {exc}")
         st.write("Pagos pendientes")
         st.dataframe(pending_orders_frame(), width="stretch", hide_index=True)
         st.write("Logs de auditoria")

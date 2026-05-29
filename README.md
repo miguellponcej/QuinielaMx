@@ -68,6 +68,8 @@ La version Streamlit incluye persistencia local de productos, publicacion/borrad
 
 Para correo automatico de confirmacion, configura `RESEND_API_KEY` y `EMAIL_FROM` en Streamlit Secrets. Si faltan, la entrega por descarga y recibo sigue funcionando dentro de la app.
 
+Si usas el fallback manual de PayPal, confirma primero el pago en PayPal y luego usa `Admin > Registrar pago manual verificado` para registrar la venta, generar link unico, recibo y email opcional.
+
 Detalles completos: `docs/streamlit-paypal-github.md`.
 
 ## Stripe
