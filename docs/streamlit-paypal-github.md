@@ -31,6 +31,14 @@ streamlit_app.py
 
 5. Add secrets in Streamlit app settings using the values below.
 
+If the GitHub repository does not exist yet, create an empty repo under your account, then run this from the project folder:
+
+```powershell
+.\scripts\push-to-github.ps1 -RepositoryUrl "https://github.com/miguellponcej/REPO_NAME.git"
+```
+
+Then deploy the repo in Streamlit Community Cloud.
+
 Streamlit's official deployment docs state that Community Cloud deploys from your workspace/GitHub flow and installs dependencies from the app's dependency files. Streamlit's secrets docs also warn not to commit `secrets.toml`; use Streamlit app settings for secrets instead.
 
 ## Streamlit Secrets
