@@ -62,7 +62,7 @@ Configura `ADMIN_EMAIL`, `ADMIN_PASSWORD`, `STRIPE_SECRET_KEY`, `PAYPAL_MODE`, `
 
 Despues del deploy, abre la pestana `Setup` dentro de la app para validar que Stripe, PayPal, la URL de retorno y la wallet publica quedaron configuradas.
 
-La version Streamlit incluye login de dueno, landing publica para compradores, persistencia local de productos, publicacion/borradores, historial de versiones editables en JSON, links de descarga unicos con expiracion, recibo basico descargable, panel de ventas con neto estimado, conversion checkout, productos mas vendidos, clientes, pagos pendientes/completados, reporte financiero JSON, panel Wallet BTC con sugerencia manual, calendario de marketing y panel Admin basico.
+La version Streamlit incluye login de dueno, landing publica para compradores, persistencia local de productos, publicacion/borradores, historial de versiones editables en JSON, links de descarga unicos con expiracion, recibo basico descargable, panel de ventas con neto estimado, conversion por landing/producto, productos mas vendidos, clientes exportables, pagos pendientes/completados, reporte financiero JSON, panel Wallet BTC con sugerencia manual, calendario de marketing y panel Admin basico.
 
 Desde `Admin > Configuracion publica` puedes guardar la direccion publica BTC y la garantia comercial que se muestra en la landing. La direccion BTC permite preparar pagos manuales en Bitcoin, pero la entrega solo se libera despues de verificacion humana desde Admin.
 

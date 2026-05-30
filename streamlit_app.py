@@ -713,6 +713,89 @@ def pending_payments_frame() -> pd.DataFrame:
     return pd.concat(frames, ignore_index=True).sort_values("created_at", ascending=False)
 
 
+def customers_frame() -> pd.DataFrame:
+    df = sales_frame()
+    columns = ["customer_email", "orders", "gross_usd", "first_purchase_at", "last_purchase_at"]
+    if df.empty or "customer_email" not in df.columns:
+        return pd.DataFrame(columns=columns)
+
+    customer_df = df[df["customer_email"].fillna("").str.strip() != ""].copy()
+    if customer_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    grouped = (
+        customer_df.groupby("customer_email")
+        .agg(
+            orders=("paypal_order_id", "count"),
+            gross_usd=("amount_usd", "sum"),
+            first_purchase_at=("captured_at", "min"),
+            last_purchase_at=("captured_at", "max"),
+        )
+        .reset_index()
+        .sort_values(["gross_usd", "orders"], ascending=False)
+    )
+    return grouped
+
+
+def product_performance_frame() -> pd.DataFrame:
+    product_df = products_frame()
+    sales_df = sales_frame()
+    pending_df = pending_payments_frame()
+    columns = [
+        "product_slug",
+        "product_title",
+        "published_status",
+        "completed_payments",
+        "pending_payments",
+        "gross_usd",
+        "customers",
+        "conversion_percent",
+    ]
+    if product_df.empty and sales_df.empty and pending_df.empty:
+        return pd.DataFrame(columns=columns)
+
+    base = product_df.rename(
+        columns={
+            "slug": "product_slug",
+            "title": "product_title",
+            "status": "published_status",
+        }
+    )
+    if base.empty:
+        base = pd.DataFrame(columns=["product_slug", "product_title", "published_status"])
+    else:
+        base = base[["product_slug", "product_title", "published_status"]]
+
+    if not sales_df.empty:
+        sales_group = (
+            sales_df.groupby(["product_slug", "product_title"])
+            .agg(
+                completed_payments=("paypal_order_id", "count"),
+                gross_usd=("amount_usd", "sum"),
+                customers=("customer_email", lambda values: values.replace("", pd.NA).dropna().nunique()),
+            )
+            .reset_index()
+        )
+    else:
+        sales_group = pd.DataFrame(columns=["product_slug", "product_title", "completed_payments", "gross_usd", "customers"])
+
+    if not pending_df.empty:
+        pending_group = pending_df.groupby("product_slug").size().reset_index(name="pending_payments")
+    else:
+        pending_group = pd.DataFrame(columns=["product_slug", "pending_payments"])
+
+    performance = base.merge(sales_group, on=["product_slug", "product_title"], how="outer")
+    performance = performance.merge(pending_group, on="product_slug", how="outer")
+    performance["product_title"] = performance["product_title"].fillna(performance["product_slug"])
+    performance["published_status"] = performance["published_status"].fillna("external")
+    for column in ["completed_payments", "pending_payments", "gross_usd", "customers"]:
+        performance[column] = performance[column].fillna(0)
+    attempts = performance["completed_payments"] + performance["pending_payments"]
+    performance["conversion_percent"] = attempts.where(attempts == 0, performance["completed_payments"] / attempts * 100.0)
+    performance.loc[attempts == 0, "conversion_percent"] = 0.0
+    return performance[columns].sort_values(["gross_usd", "completed_payments"], ascending=False)
+
+
 def audit_frame() -> pd.DataFrame:
     init_db()
     with sqlite3.connect(DB_PATH) as conn:
@@ -1308,8 +1391,11 @@ def main() -> None:
             st.subheader("Productos mas vendidos")
             st.dataframe(best, width="stretch", hide_index=True)
             st.metric("Clientes registrados", str(df["customer_email"].dropna().replace("", pd.NA).dropna().nunique()))
+        st.subheader("Conversion por landing")
+        st.dataframe(product_performance_frame(), width="stretch", hide_index=True)
         st.metric("Pagos pendientes", str(len(pending_df)))
         st.metric("Pagos completados", str(len(df)))
+        st.subheader("Ventas registradas")
         st.dataframe(df, width="stretch", hide_index=True)
         st.download_button(
             "Exportar ventas CSV",
@@ -1405,6 +1491,16 @@ def main() -> None:
                 save_setting("commercial_guarantee", updated_guarantee)
                 st.success("Configuracion publica actualizada.")
                 st.rerun()
+        with st.expander("Clientes registrados"):
+            customer_df = customers_frame()
+            st.dataframe(customer_df, width="stretch", hide_index=True)
+            st.download_button(
+                "Exportar clientes CSV",
+                data=customer_df.to_csv(index=False),
+                file_name="customers-report.csv",
+                mime="text/csv",
+                width="stretch",
+            )
         product_df = products_frame()
         st.write("Productos guardados")
         st.dataframe(product_df, width="stretch", hide_index=True)
