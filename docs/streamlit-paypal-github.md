@@ -93,6 +93,7 @@ The deployed Streamlit app also includes:
 - Optional OpenAI product generation with local fallback and safety filters.
 - Public buyer storefront for checkout and paid download links.
 - Product draft/publish persistence in local SQLite.
+- Validated JSON product editor and public landing links per product from Admin.
 - Editable JSON product version history with restore/publish actions from Admin.
 - Stripe Checkout as the primary payment flow.
 - Unique expiring download links after Stripe verification or PayPal capture.

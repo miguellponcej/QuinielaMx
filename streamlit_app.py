@@ -17,7 +17,14 @@ import streamlit as st
 
 from streamlit_src.paypal import PayPalConfig, capture_order, create_order, paypal_access_token
 from streamlit_src.pdf_delivery import product_pdf_bytes
-from streamlit_src.product_engine import analyze_niche, generate_product, marketing_assets, product_from_dict
+from streamlit_src.product_engine import (
+    analyze_niche,
+    generate_product,
+    marketing_assets,
+    product_from_dict,
+    sanitize_copy,
+    slugify,
+)
 from streamlit_src.stripe_checkout import (
     StripeConfig,
     create_checkout_session,
@@ -794,8 +801,12 @@ def product_performance_frame() -> pd.DataFrame:
     for column in ["completed_payments", "pending_payments", "gross_usd", "customers"]:
         performance[column] = performance[column].fillna(0)
     attempts = performance["completed_payments"] + performance["pending_payments"]
-    performance["conversion_percent"] = attempts.where(attempts == 0, performance["completed_payments"] / attempts * 100.0)
-    performance.loc[attempts == 0, "conversion_percent"] = 0.0
+    performance["conversion_percent"] = 0.0
+    nonzero_attempts = attempts > 0
+    if bool(nonzero_attempts.any()):
+        performance.loc[nonzero_attempts, "conversion_percent"] = (
+            performance.loc[nonzero_attempts, "completed_payments"] / attempts.loc[nonzero_attempts] * 100.0
+        )
     return performance[columns].sort_values(["gross_usd", "completed_payments"], ascending=False)
 
 
@@ -964,6 +975,42 @@ def render_download_token_if_needed() -> bool:
 def product_dict_from_product(product: Any) -> dict[str, Any]:
     product_dict = product.to_dict()
     product_dict["slug"] = product.slug
+    return product_dict
+
+
+def sanitized_product_payload(value: dict[str, Any], default_slug: str | None = None) -> dict[str, Any]:
+    draft = product_from_dict(value)
+    product_dict = product_dict_from_product(draft)
+    product_dict["slug"] = slugify(str(value.get("slug") or default_slug or product_dict["slug"]))
+    product_dict["niche"] = sanitize_copy(product_dict["niche"])[:120]
+    product_dict["product_type"] = sanitize_copy(product_dict["product_type"])[:60]
+    product_dict["title"] = sanitize_copy(product_dict["title"])[:120]
+    product_dict["subtitle"] = sanitize_copy(product_dict["subtitle"])[:220]
+    product_dict["description"] = sanitize_copy(product_dict["description"])[:420]
+    product_dict["price_usd"] = min(max(float(product_dict["price_usd"]), 1.0), 999.0)
+    product_dict["sales_bullets"] = [
+        sanitize_copy(str(item))[:220]
+        for item in product_dict["sales_bullets"]
+        if str(item).strip()
+    ][:10]
+    product_dict["table_of_contents"] = [
+        sanitize_copy(str(item))[:160]
+        for item in product_dict["table_of_contents"]
+        if str(item).strip()
+    ][:12]
+    clean_sections = []
+    for section in product_dict["sections"]:
+        heading = sanitize_copy(str(section.get("heading", "")))[:160]
+        body = [
+            sanitize_copy(str(item))[:650]
+            for item in section.get("body", [])
+            if str(item).strip()
+        ]
+        if heading and body:
+            clean_sections.append({"heading": heading, "body": body})
+    product_dict["sections"] = clean_sections[:12]
+    if not product_dict["sales_bullets"] or not product_dict["table_of_contents"] or not product_dict["sections"]:
+        raise ValueError("El producto necesita bullets, indice y secciones con contenido.")
     return product_dict
 
 
@@ -1558,6 +1605,9 @@ def main() -> None:
             selected_slug = st.selectbox("Producto", product_df["slug"].tolist())
             selected_product = saved_product(selected_slug)
             if selected_product:
+                product_public_url = f"{app_base_url()}?product_slug={selected_slug}"
+                st.link_button("Abrir landing publica del producto", product_public_url, width="stretch")
+                st.code(product_public_url, language="text")
                 new_price = st.number_input(
                     "Precio USD",
                     min_value=1.0,
@@ -1572,6 +1622,32 @@ def main() -> None:
                 if col_delete.button("Eliminar producto", width="stretch"):
                     delete_product(selected_slug)
                     st.warning("Producto eliminado.")
+                with st.expander("Editar producto completo JSON"):
+                    edited_product_json = st.text_area(
+                        "JSON editable del producto",
+                        value=json.dumps(selected_product, indent=2, ensure_ascii=False),
+                        height=360,
+                        key=f"edit_product_json_{selected_slug}",
+                    )
+                    edit_status = st.radio(
+                        "Guardar edicion como",
+                        ["draft", "published"],
+                        horizontal=True,
+                        key=f"edit_product_status_{selected_slug}",
+                    )
+                    if st.button("Validar y guardar edicion", width="stretch", key=f"save_product_json_{selected_slug}"):
+                        try:
+                            parsed_product = json.loads(edited_product_json)
+                            if not isinstance(parsed_product, dict):
+                                raise ValueError("El JSON debe ser un objeto.")
+                            edited_product = sanitized_product_payload(parsed_product, selected_slug)
+                            save_product(edited_product, edit_status)
+                            st.success("Producto editado y version guardada.")
+                            if edited_product["slug"] != selected_slug:
+                                st.info(f"El slug cambio a {edited_product['slug']}; revisa el nuevo link publico.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(f"No se pudo guardar el JSON: {exc}")
                 with st.expander("Versiones editables"):
                     version_df = product_versions_frame(selected_slug)
                     st.dataframe(version_df, width="stretch", hide_index=True)
