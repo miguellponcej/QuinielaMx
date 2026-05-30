@@ -89,6 +89,7 @@ The deployed Streamlit app also includes:
 - Owner login that keeps product generation, sales, wallet, reports, and admin views private.
 - Public buyer storefront for checkout and paid download links.
 - Product draft/publish persistence in local SQLite.
+- Editable JSON product version history with restore/publish actions from Admin.
 - Stripe Checkout as the primary payment flow.
 - Unique expiring download links after Stripe verification or PayPal capture.
 - Basic receipt download after payment confirmation.

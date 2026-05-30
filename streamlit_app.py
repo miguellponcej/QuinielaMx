@@ -182,6 +182,19 @@ def init_db() -> None:
         )
         conn.execute(
             """
+            create table if not exists product_versions (
+                id integer primary key autoincrement,
+                product_slug text not null,
+                version_number integer not null,
+                status text not null,
+                product_json text not null,
+                created_at text not null,
+                unique(product_slug, version_number)
+            )
+            """
+        )
+        conn.execute(
+            """
             create table if not exists sales (
                 id integer primary key autoincrement,
                 paypal_order_id text unique,
@@ -334,7 +347,26 @@ def save_product(product: dict[str, Any], status: str = "draft") -> None:
                 timestamp,
             ),
         )
-    log_event("save", "product", product["slug"], {"status": status})
+        row = conn.execute(
+            "select coalesce(max(version_number), 0) + 1 from product_versions where product_slug = ?",
+            (product["slug"],),
+        ).fetchone()
+        version_number = int(row[0] if row else 1)
+        conn.execute(
+            """
+            insert into product_versions (
+                product_slug, version_number, status, product_json, created_at
+            ) values (?, ?, ?, ?, ?)
+            """,
+            (
+                product["slug"],
+                version_number,
+                status,
+                json.dumps(product, ensure_ascii=False),
+                timestamp,
+            ),
+        )
+    log_event("save", "product", product["slug"], {"status": status, "version_number": version_number})
 
 
 def products_frame() -> pd.DataFrame:
@@ -367,9 +399,35 @@ def saved_product(slug: str) -> dict[str, Any] | None:
     return json.loads(row[0]) if row else None
 
 
+def product_versions_frame(slug: str) -> pd.DataFrame:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        return pd.read_sql_query(
+            """
+            select id, product_slug, version_number, status, created_at
+            from product_versions
+            where product_slug = ?
+            order by version_number desc
+            """,
+            conn,
+            params=(slug,),
+        )
+
+
+def saved_product_version(version_id: int) -> dict[str, Any] | None:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute(
+            "select product_json from product_versions where id = ?",
+            (int(version_id),),
+        ).fetchone()
+    return json.loads(row[0]) if row else None
+
+
 def delete_product(slug: str) -> None:
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute("delete from products where slug = ?", (slug,))
+        conn.execute("delete from product_versions where product_slug = ?", (slug,))
     log_event("delete", "product", slug)
 
 
@@ -1368,6 +1426,37 @@ def main() -> None:
                 if col_delete.button("Eliminar producto", width="stretch"):
                     delete_product(selected_slug)
                     st.warning("Producto eliminado.")
+                with st.expander("Versiones editables"):
+                    version_df = product_versions_frame(selected_slug)
+                    st.dataframe(version_df, width="stretch", hide_index=True)
+                    if not version_df.empty:
+                        version_options = {
+                            f"v{int(row['version_number'])} - {row['status']} - {row['created_at']}": int(row["id"])
+                            for _, row in version_df.iterrows()
+                        }
+                        selected_version_label = st.selectbox(
+                            "Version",
+                            list(version_options.keys()),
+                            key="admin_product_version",
+                        )
+                        selected_version = saved_product_version(version_options[selected_version_label])
+                        if selected_version:
+                            st.download_button(
+                                "Descargar version editable JSON",
+                                data=json.dumps(selected_version, indent=2, ensure_ascii=False),
+                                file_name=f"{selected_version['slug']}-version.json",
+                                mime="application/json",
+                                width="stretch",
+                            )
+                            col_restore, col_publish_version = st.columns(2)
+                            if col_restore.button("Restaurar como borrador", width="stretch"):
+                                save_product(selected_version, "draft")
+                                st.success("Version restaurada como borrador.")
+                                st.rerun()
+                            if col_publish_version.button("Publicar esta version", width="stretch"):
+                                save_product(selected_version, "published")
+                                st.success("Version publicada.")
+                                st.rerun()
                 with st.expander("Registrar pago manual verificado"):
                     manual_provider = st.selectbox(
                         "Metodo verificado",
