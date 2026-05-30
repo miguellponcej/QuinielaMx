@@ -163,7 +163,7 @@ def generate_product(market: str, idea: dict[str, Any] | None = None) -> Product
         {
             "heading": "Checklist de publicacion",
             "body": [
-                "Titulo claro, precio visible, beneficios especificos y boton de compra PayPal.",
+                "Titulo claro, precio visible, beneficios especificos y boton de compra Stripe con PayPal como respaldo.",
                 "Agrega FAQ, politica comercial y una descripcion honesta del producto.",
             ],
         },
@@ -186,7 +186,7 @@ def generate_product(market: str, idea: dict[str, Any] | None = None) -> Product
             "Producto digital listo para descargar en PDF.",
             "Pagina de venta con beneficios, FAQ, garantia y precio.",
             "Copy de marketing para anuncios, redes, email y WhatsApp.",
-            "Flujo PayPal preparado para ventas reales.",
+            "Flujo Stripe preparado para ventas reales, con PayPal como respaldo.",
             "Contenido orientado a utilidad real, sin promesas de rentabilidad fija.",
         ],
         table_of_contents=toc,

@@ -24,6 +24,7 @@ from streamlit_src.stripe_checkout import (
     retrieve_checkout_session,
     stripe_account,
 )
+from streamlit_src.openai_ai import OpenAIConfig, generate_ai_product
 
 
 APP_NAME = "AI Digital Product Money Machine"
@@ -37,6 +38,8 @@ SECRETS_TEMPLATE = """APP_BASE_URL = ""
 ADMIN_EMAIL = "owner@example.com"
 ADMIN_PASSWORD = "replace-with-strong-owner-password"
 ADMIN_PASSWORD_HASH = ""
+OPENAI_API_KEY = ""
+OPENAI_MODEL = "gpt-4.1-mini"
 STRIPE_SECRET_KEY = "sk_test_replace_me"
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
@@ -848,6 +851,13 @@ def stripe_config() -> StripeConfig:
     )
 
 
+def openai_config() -> OpenAIConfig:
+    return OpenAIConfig(
+        api_key=secret("OPENAI_API_KEY"),
+        model=secret("OPENAI_MODEL", "gpt-4.1-mini"),
+    )
+
+
 def paypal_public_handle() -> str:
     handle = secret("PAYPAL_PUBLIC_HANDLE", "miguellponcej").strip()
     return handle.lstrip("@")
@@ -894,13 +904,15 @@ def render_setup_tab(paypal: PayPalConfig, stripe: StripeConfig, btc_address: st
         st.success("Los secretos basicos estan presentes.")
 
     st.write("Estado detectado")
+    ai = openai_config()
     status_col_1, status_col_2, status_col_3, status_col_4, status_col_5, status_col_6 = st.columns(6)
-    status_col_1.metric("Stripe", "listo" if stripe.is_configured else "pendiente")
-    status_col_2.metric("PayPal", "listo" if paypal.is_configured else "pendiente")
-    status_col_3.metric("Modo PayPal", paypal.mode)
+    status_col_1.metric("OpenAI", "listo" if ai.is_configured else "fallback local")
+    status_col_2.metric("Stripe", "listo" if stripe.is_configured else "pendiente")
+    status_col_3.metric("PayPal", "listo" if paypal.is_configured else "pendiente")
     status_col_4.metric("Wallet BTC", "lista" if btc_address.strip() else "pendiente")
     status_col_5.metric("PayPal publico", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
     status_col_6.metric("Login dueno", "listo" if owner_auth_configured() else "pendiente")
+    st.caption(f"Modo PayPal: {paypal.mode}")
     st.caption(f"URL de retorno detectada: {stripe.app_base_url}")
 
     if st.button("Probar conexion Stripe", width="stretch"):
@@ -1218,6 +1230,7 @@ def main() -> None:
     init_db()
     paypal = paypal_config()
     stripe = stripe_config()
+    ai = openai_config()
     public_paypal_handle = paypal_public_handle()
     btc_address = wallet_public_address()
     fallback_product = default_product_dict()
@@ -1233,6 +1246,7 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Configuracion")
+        st.write("OpenAI:", "configurado" if ai.is_configured else "fallback local")
         st.write("Stripe:", "configurado" if stripe.is_configured else "pendiente")
         st.write("PayPal:", "configurado" if paypal.is_configured else "pendiente")
         st.write("Modo PayPal:", paypal.mode)
@@ -1265,9 +1279,45 @@ def main() -> None:
             idea_titles = [idea["title"] for idea in analysis["ideas"]]
             selected_title = st.radio("Elige una idea", idea_titles, label_visibility="collapsed")
             selected_idea = next(idea for idea in analysis["ideas"] if idea["title"] == selected_title)
+            use_openai = st.checkbox(
+                "Usar IA OpenAI para enriquecer el producto",
+                value=False,
+                disabled=not ai.is_configured,
+            )
+            if not ai.is_configured:
+                st.caption("Configura OPENAI_API_KEY para activar generacion con IA. El generador local sigue disponible.")
+            generate_clicked = st.button(
+                "Generar producto con IA" if use_openai else "Actualizar producto local",
+                type="primary" if use_openai else "secondary",
+                width="stretch",
+            )
 
-        product = generate_product(market, selected_idea)
-        product_dict = product_dict_from_product(product)
+        generation_signature = json.dumps(
+            {"market": market, "idea": selected_idea, "openai": use_openai},
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+        fallback_product = generate_product(market, selected_idea)
+        if generate_clicked:
+            if use_openai and ai.is_configured:
+                with st.spinner("Generando producto con OpenAI..."):
+                    try:
+                        product = generate_ai_product(ai, market, selected_idea)
+                        st.success("Producto generado con IA y filtros de seguridad.")
+                    except Exception as exc:
+                        product = fallback_product
+                        st.warning(f"No se pudo usar OpenAI; se genero una version local segura: {exc}")
+            else:
+                product = fallback_product
+            product_dict = product_dict_from_product(product)
+            st.session_state["studio_product_signature"] = generation_signature
+            st.session_state["studio_product_dict"] = product_dict
+        elif st.session_state.get("studio_product_signature") == generation_signature:
+            product_dict = st.session_state.get("studio_product_dict", product_dict_from_product(fallback_product))
+            product = product_from_dict(product_dict)
+        else:
+            product = fallback_product
+            product_dict = product_dict_from_product(product)
 
         with col_right:
             st.subheader(product.title)

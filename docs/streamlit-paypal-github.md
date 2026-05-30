@@ -65,6 +65,8 @@ APP_BASE_URL = ""
 ADMIN_EMAIL = "owner@example.com"
 ADMIN_PASSWORD = "replace-with-strong-owner-password"
 ADMIN_PASSWORD_HASH = ""
+OPENAI_API_KEY = ""
+OPENAI_MODEL = "gpt-4.1-mini"
 STRIPE_SECRET_KEY = "sk_test_replace_me"
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
@@ -79,6 +81,7 @@ Use Stripe test mode first. For PayPal, use `sandbox` first and switch `PAYPAL_M
 
 `APP_BASE_URL` is only needed when you want to force a custom return URL. Otherwise, the app uses Streamlit's runtime URL as the Stripe and PayPal return/cancel base.
 `OWNER_BTC_PUBLIC_ADDRESS` can be set here as a default or later from the private Admin panel.
+`OPENAI_API_KEY` is optional. If it is blank, the app uses the local deterministic generator.
 
 After the app is deployed, open the **Setup** tab. It shows the same GitHub file URL,
 the secrets template, the detected return URL, and **Probar conexion Stripe** /
@@ -87,6 +90,7 @@ the secrets template, the detected return URL, and **Probar conexion Stripe** /
 The deployed Streamlit app also includes:
 
 - Owner login that keeps product generation, sales, wallet, reports, and admin views private.
+- Optional OpenAI product generation with local fallback and safety filters.
 - Public buyer storefront for checkout and paid download links.
 - Product draft/publish persistence in local SQLite.
 - Editable JSON product version history with restore/publish actions from Admin.
@@ -162,5 +166,7 @@ For local payment tests, copy `.streamlit/secrets.toml.example` to `.streamlit/s
 
 - Streamlit deploy docs: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app
 - Streamlit secrets docs: https://docs.streamlit.io/deploy/streamlit-community-cloud/deploy-your-app/secrets-management
+- OpenAI Responses API: https://platform.openai.com/docs/api-reference/responses/create
+- OpenAI Structured Outputs: https://platform.openai.com/docs/guides/structured-outputs
 - Stripe Checkout Sessions API: https://docs.stripe.com/api/checkout/sessions
 - PayPal Checkout integration: https://developer.paypal.com/studio/checkout/standard/integrate
