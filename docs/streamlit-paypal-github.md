@@ -62,6 +62,9 @@ Paste this into Streamlit Cloud > App > Settings > Secrets, replacing the values
 ```toml
 # Optional. If blank, the app detects its public Streamlit URL automatically.
 APP_BASE_URL = ""
+ADMIN_EMAIL = "owner@example.com"
+ADMIN_PASSWORD = "replace-with-strong-owner-password"
+ADMIN_PASSWORD_HASH = ""
 STRIPE_SECRET_KEY = "sk_test_replace_me"
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
@@ -82,6 +85,8 @@ the secrets template, the detected return URL, and **Probar conexion Stripe** /
 
 The deployed Streamlit app also includes:
 
+- Owner login that keeps product generation, sales, wallet, reports, and admin views private.
+- Public buyer storefront for checkout and paid download links.
 - Product draft/publish persistence in local SQLite.
 - Stripe Checkout as the primary payment flow.
 - Unique expiring download links after Stripe verification or PayPal capture.
@@ -105,6 +110,15 @@ The app uses Stripe Checkout Sessions for one-time digital product payments:
 
 Keep `STRIPE_SECRET_KEY` in Streamlit Secrets. Do not paste it into chat or commit it.
 
+## Owner login
+
+Set `ADMIN_EMAIL` and a strong `ADMIN_PASSWORD` in Streamlit Secrets. The app keeps
+the public landing/checkout visible, but hides product generation, financial dashboard,
+wallet view, and admin tools until the owner logs in.
+
+`ADMIN_PASSWORD_HASH` is optional. If you set it, use the SHA-256 hash of the password
+and leave `ADMIN_PASSWORD` blank. Do not commit either value.
+
 ## PayPal setup
 
 The app uses PayPal Orders API flow:
@@ -119,6 +133,7 @@ Official PayPal Checkout guidance describes this backend flow: create an order, 
 ## Security
 
 - Do not paste Stripe or PayPal secrets into chat.
+- Do not paste the owner password into chat.
 - Do not commit `.streamlit/secrets.toml`.
 - The app does not store cards, bank details, BTC private keys, seed phrases, or wallet passwords.
 - BTC wallet support is display/reference only.

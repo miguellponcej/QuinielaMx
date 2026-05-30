@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import os
 import secrets as token_secrets
@@ -32,6 +34,9 @@ DEPLOY_FILE_URL = (
 )
 GITHUB_BRANCH_URL = "https://github.com/miguellponcej/QuinielaMx/tree/ai-money-machine-streamlit"
 SECRETS_TEMPLATE = """APP_BASE_URL = ""
+ADMIN_EMAIL = "owner@example.com"
+ADMIN_PASSWORD = "replace-with-strong-owner-password"
+ADMIN_PASSWORD_HASH = ""
 STRIPE_SECRET_KEY = "sk_test_replace_me"
 PAYPAL_MODE = "sandbox"
 PAYPAL_CLIENT_ID = "your-paypal-client-id"
@@ -44,6 +49,10 @@ EMAIL_FROM = "AI Digital Product Money Machine <onboarding@resend.dev>"
 
 
 st.set_page_config(page_title=APP_NAME, page_icon="💼", layout="wide")
+
+
+MAX_FAILED_LOGINS = 5
+LOGIN_LOCK_MINUTES = 15
 
 
 def secret(name: str, default: str = "") -> str:
@@ -74,6 +83,83 @@ def app_base_url() -> str:
             return urlunsplit((parsed.scheme, parsed.netloc, path, "", "")).rstrip("/")
 
     return "http://localhost:8501"
+
+
+def is_placeholder(value: str) -> bool:
+    cleaned = value.strip().lower()
+    return cleaned == "" or cleaned.startswith(("replace", "your-")) or "replace-with" in cleaned
+
+
+def owner_email() -> str:
+    return secret("ADMIN_EMAIL", "owner@example.com").strip().lower()
+
+
+def password_digest(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+
+def owner_auth_configured() -> bool:
+    password = secret("ADMIN_PASSWORD")
+    password_hash = secret("ADMIN_PASSWORD_HASH")
+    return not is_placeholder(password) or not is_placeholder(password_hash)
+
+
+def verify_owner_credentials(email: str, password: str) -> bool:
+    if email.strip().lower() != owner_email():
+        return False
+
+    configured_hash = secret("ADMIN_PASSWORD_HASH").strip()
+    if not is_placeholder(configured_hash):
+        return hmac.compare_digest(password_digest(password), configured_hash)
+
+    configured_password = secret("ADMIN_PASSWORD").strip()
+    if not is_placeholder(configured_password):
+        return hmac.compare_digest(password, configured_password)
+
+    return False
+
+
+def owner_authenticated() -> bool:
+    return bool(st.session_state.get("owner_authenticated", False))
+
+
+def login_locked_until() -> datetime | None:
+    raw_value = st.session_state.get("owner_login_locked_until")
+    if not raw_value:
+        return None
+    try:
+        locked_until = datetime.fromisoformat(str(raw_value))
+    except ValueError:
+        return None
+    if locked_until <= datetime.now(timezone.utc):
+        st.session_state.pop("owner_login_locked_until", None)
+        st.session_state["owner_failed_logins"] = 0
+        return None
+    return locked_until
+
+
+def register_failed_login(email: str) -> None:
+    failed = int(st.session_state.get("owner_failed_logins", 0)) + 1
+    st.session_state["owner_failed_logins"] = failed
+    if failed >= MAX_FAILED_LOGINS:
+        locked_until = datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCK_MINUTES)
+        st.session_state["owner_login_locked_until"] = locked_until.isoformat()
+    log_event("login_failed", "owner_session", email.strip().lower(), {"failed_attempts": failed})
+
+
+def register_successful_login(email: str) -> None:
+    st.session_state["owner_authenticated"] = True
+    st.session_state["owner_email"] = email.strip().lower()
+    st.session_state["owner_failed_logins"] = 0
+    st.session_state.pop("owner_login_locked_until", None)
+    log_event("login_success", "owner_session", email.strip().lower())
+
+
+def logout_owner() -> None:
+    email = str(st.session_state.get("owner_email", ""))
+    st.session_state["owner_authenticated"] = False
+    st.session_state.pop("owner_email", None)
+    log_event("logout", "owner_session", email)
 
 
 def init_db() -> None:
@@ -211,6 +297,20 @@ def products_frame() -> pd.DataFrame:
     with sqlite3.connect(DB_PATH) as conn:
         return pd.read_sql_query(
             "select slug, title, niche, product_type, price_usd, status, updated_at from products order by updated_at desc",
+            conn,
+        )
+
+
+def published_products_frame() -> pd.DataFrame:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        return pd.read_sql_query(
+            """
+            select slug, title, niche, product_type, price_usd, status, updated_at
+            from products
+            where status = 'published'
+            order by updated_at desc
+            """,
             conn,
         )
 
@@ -602,12 +702,13 @@ def render_setup_tab(paypal: PayPalConfig, stripe: StripeConfig, btc_address: st
         st.success("Los secretos basicos estan presentes.")
 
     st.write("Estado detectado")
-    status_col_1, status_col_2, status_col_3, status_col_4, status_col_5 = st.columns(5)
+    status_col_1, status_col_2, status_col_3, status_col_4, status_col_5, status_col_6 = st.columns(6)
     status_col_1.metric("Stripe", "listo" if stripe.is_configured else "pendiente")
     status_col_2.metric("PayPal", "listo" if paypal.is_configured else "pendiente")
     status_col_3.metric("Modo PayPal", paypal.mode)
     status_col_4.metric("Wallet BTC", "lista" if btc_address.strip() else "pendiente")
     status_col_5.metric("PayPal publico", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
+    status_col_6.metric("Login dueno", "listo" if owner_auth_configured() else "pendiente")
     st.caption(f"URL de retorno detectada: {stripe.app_base_url}")
 
     if st.button("Probar conexion Stripe", width="stretch"):
@@ -654,6 +755,154 @@ def render_download_token_if_needed() -> bool:
         width="stretch",
     )
     return True
+
+
+def product_dict_from_product(product: Any) -> dict[str, Any]:
+    product_dict = product.to_dict()
+    product_dict["slug"] = product.slug
+    return product_dict
+
+
+def default_product_dict() -> dict[str, Any]:
+    market = "consultores independientes"
+    analysis = analyze_niche(market)
+    product = generate_product(market, analysis["ideas"][0])
+    return product_dict_from_product(product)
+
+
+def public_product_choice(fallback_product: dict[str, Any]) -> dict[str, Any]:
+    published_df = published_products_frame()
+    if published_df.empty:
+        return fallback_product
+
+    requested_slug = str(st.query_params.get("product_slug", "")).strip()
+    if requested_slug:
+        requested_product = saved_product(requested_slug)
+        if requested_product:
+            return requested_product
+
+    product_titles = {
+        row["title"]: row["slug"]
+        for _, row in published_df.iterrows()
+    }
+    selected_title = st.selectbox("Producto", list(product_titles.keys()), label_visibility="collapsed")
+    return saved_product(product_titles[selected_title]) or fallback_product
+
+
+def render_owner_login() -> None:
+    if owner_authenticated():
+        st.success(f"Sesion dueno activa: {st.session_state.get('owner_email', owner_email())}")
+        if st.button("Cerrar sesion", width="stretch"):
+            logout_owner()
+            st.rerun()
+        return
+
+    st.subheader("Acceso dueno")
+    if not owner_auth_configured():
+        st.warning("Configura ADMIN_EMAIL y ADMIN_PASSWORD en Streamlit Secrets para abrir el panel privado.")
+        return
+
+    locked_until = login_locked_until()
+    if locked_until:
+        st.error(f"Login pausado hasta {locked_until.isoformat()} UTC por intentos fallidos.")
+        return
+
+    email = st.text_input("Email admin", value=owner_email(), key="owner_login_email")
+    password = st.text_input("Password admin", type="password", key="owner_login_password")
+    if st.button("Entrar al panel", type="primary", width="stretch"):
+        if verify_owner_credentials(email, password):
+            register_successful_login(email)
+            st.rerun()
+        else:
+            register_failed_login(email)
+            remaining = max(MAX_FAILED_LOGINS - int(st.session_state.get("owner_failed_logins", 0)), 0)
+            st.error(f"Credenciales incorrectas. Intentos restantes: {remaining}.")
+
+
+def render_landing_checkout(
+    product_dict: dict[str, Any],
+    stripe: StripeConfig,
+    paypal: PayPalConfig,
+    public_paypal_handle: str,
+    key_prefix: str,
+) -> None:
+    product = product_from_dict(product_dict)
+    st.subheader(product.title)
+    st.write(product.subtitle)
+    st.write("**Problema que resuelve**")
+    st.write(
+        f"Personas en {product.niche} necesitan una herramienta concreta para tomar accion sin promesas exageradas."
+    )
+    for bullet in product.sales_bullets:
+        st.write(f"- {bullet}")
+    st.write("**Que incluye**")
+    for item in product.table_of_contents:
+        st.write(f"- {item}")
+    st.write("**Preguntas frecuentes**")
+    st.write("- Es una herramienta practica, no una promesa de ingresos.")
+    st.write("- La entrega se hace con un link unico despues de confirmar el pago.")
+    st.write("- El link dura 48 horas o 3 descargas.")
+    st.write("**Garantia comercial**")
+    st.write("Si el archivo no se puede descargar, se repone el link o se devuelve el pago segun revision.")
+    st.divider()
+    st.metric("Precio", f"${float(product_dict['price_usd']):.2f} USD")
+
+    if stripe.is_configured:
+        if st.button("Crear checkout Stripe", type="primary", width="stretch", key=f"{key_prefix}_stripe_checkout"):
+            with st.spinner("Creando checkout Stripe..."):
+                try:
+                    session = create_checkout_session(stripe, product_dict)
+                    record_pending_stripe_session(session["id"], product_dict)
+                    st.session_state[f"{key_prefix}_last_stripe_session"] = session
+                    st.success("Checkout creado. Abre Stripe para completar el pago.")
+                except Exception as exc:
+                    st.error(f"No se pudo crear el checkout Stripe: {exc}")
+        stripe_session = st.session_state.get(f"{key_prefix}_last_stripe_session")
+        if stripe_session:
+            st.link_button("Pagar con Stripe", stripe_session["url"], width="stretch")
+    else:
+        st.warning("El checkout principal Stripe todavia no esta configurado.")
+
+    st.divider()
+    st.caption("PayPal queda disponible como respaldo o para pagos manuales verificados.")
+
+    if paypal.is_configured:
+        if st.button("Crear checkout PayPal", width="stretch", key=f"{key_prefix}_paypal_checkout"):
+            with st.spinner("Creando orden PayPal..."):
+                try:
+                    order = create_order(paypal, product_dict)
+                    record_pending_order(order["id"], product_dict)
+                    st.session_state[f"{key_prefix}_last_paypal_order"] = order
+                    st.success("Orden creada. Abre PayPal para completar el pago.")
+                except Exception as exc:
+                    st.error(f"No se pudo crear la orden PayPal: {exc}")
+        order = st.session_state.get(f"{key_prefix}_last_paypal_order")
+        if order:
+            st.link_button("Pagar con PayPal", order["approval_url"], width="stretch")
+    elif public_paypal_handle:
+        st.link_button(
+            f"Pago manual por PayPal @{public_paypal_handle}",
+            f"https://www.paypal.me/{public_paypal_handle}",
+            width="stretch",
+        )
+        st.caption(
+            "Pago manual no confirma automaticamente la orden ni libera descarga. "
+            "El dueno debe verificarlo en PayPal y generar entrega desde Admin."
+        )
+
+    st.info("Despues del retorno de Stripe o PayPal, la app verifica el pago y habilita la descarga del PDF.")
+
+
+def render_public_storefront(
+    fallback_product: dict[str, Any],
+    stripe: StripeConfig,
+    paypal: PayPalConfig,
+    public_paypal_handle: str,
+) -> None:
+    st.header("Landing publica")
+    st.caption("Vista para compradores. El panel privado requiere login del dueno.")
+    product_dict = public_product_choice(fallback_product)
+    render_landing_checkout(product_dict, stripe, paypal, public_paypal_handle, "public")
 
 
 def capture_return_if_needed(product: dict[str, Any], config: PayPalConfig) -> bool:
@@ -768,11 +1017,17 @@ def main() -> None:
     paypal = paypal_config()
     stripe = stripe_config()
     public_paypal_handle = paypal_public_handle()
+    btc_address = secret("OWNER_BTC_PUBLIC_ADDRESS", "")
+    fallback_product = default_product_dict()
 
     st.title(APP_NAME)
     st.caption("Crea, publica, cobra con Stripe/PayPal y entrega productos digitales reales.")
     render_security_notice()
-    render_download_token_if_needed()
+    if render_download_token_if_needed():
+        st.stop()
+
+    if capture_stripe_return_if_needed(fallback_product, stripe) or capture_return_if_needed(fallback_product, paypal):
+        st.stop()
 
     with st.sidebar:
         st.header("Configuracion")
@@ -781,9 +1036,14 @@ def main() -> None:
         st.write("Modo PayPal:", paypal.mode)
         st.write("PayPal publico:", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
         st.caption(f"Retorno: {stripe.app_base_url}")
-        btc_address = secret("OWNER_BTC_PUBLIC_ADDRESS", "")
         st.text_input("Wallet BTC publica", value=btc_address, disabled=True)
         st.caption("Solo referencia publica. No se solicitan ni guardan llaves privadas.")
+        st.divider()
+        render_owner_login()
+
+    if not owner_authenticated():
+        render_public_storefront(fallback_product, stripe, paypal, public_paypal_handle)
+        st.stop()
 
     tab_setup, tab_build, tab_landing, tab_sales, tab_wallet, tab_marketing, tab_admin = st.tabs(
         ["Setup", "Producto", "Landing y checkout", "Ventas", "Wallet BTC", "Marketing", "Admin"]
@@ -805,8 +1065,7 @@ def main() -> None:
             selected_idea = next(idea for idea in analysis["ideas"] if idea["title"] == selected_title)
 
         product = generate_product(market, selected_idea)
-        product_dict = product.to_dict()
-        product_dict["slug"] = product.slug
+        product_dict = product_dict_from_product(product)
 
         with col_right:
             st.subheader(product.title)
