@@ -99,7 +99,7 @@ The deployed Streamlit app also includes:
 - Unique expiring download links after Stripe verification or PayPal capture.
 - Basic receipt download after payment confirmation.
 - Optional confirmation email through Resend when `RESEND_API_KEY` and `EMAIL_FROM` are configured.
-- Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, checkout conversion by landing/product, customers, pending payments, completed payments, CSV export, and financial JSON export.
+- Sales dashboard with gross revenue, estimated net revenue, BTC equivalent, provider/currency per sale, checkout conversion by landing/product, customers, pending payments, completed payments, CSV export, and financial JSON export.
 - Wallet BTC tab with public address, accumulated revenue, BTC estimate, and manual conversion guidance.
 - Admin tab for product price updates, customer export, delete actions, pending orders, and audit logs.
 - Manual verified payment registration from Admin for PayPal public-handle payments.

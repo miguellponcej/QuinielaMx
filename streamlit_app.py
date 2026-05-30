@@ -212,12 +212,21 @@ def init_db() -> None:
                 product_title text not null,
                 customer_email text,
                 amount_usd real not null,
+                currency text not null default 'USD',
+                provider text not null default 'unknown',
                 status text not null,
                 captured_at text not null,
                 raw_payload text
             )
             """
         )
+        existing_sales_columns = {
+            row[1] for row in conn.execute("pragma table_info(sales)").fetchall()
+        }
+        if "currency" not in existing_sales_columns:
+            conn.execute("alter table sales add column currency text not null default 'USD'")
+        if "provider" not in existing_sales_columns:
+            conn.execute("alter table sales add column provider text not null default 'unknown'")
         conn.execute(
             """
             create table if not exists pending_orders (
@@ -509,16 +518,44 @@ def customer_email_from_payload(capture_payload: dict[str, Any]) -> str:
     return str(capture_payload.get("customer_email", "")).strip()
 
 
+def payment_provider_from_payload(order_id: str, capture_payload: dict[str, Any]) -> str:
+    explicit_provider = str(capture_payload.get("provider", "")).strip().lower()
+    if explicit_provider:
+        return explicit_provider[:40]
+    if order_id.startswith("stripe_") or capture_payload.get("object") == "checkout.session":
+        return "stripe"
+    return "paypal"
+
+
+def currency_from_payload(capture_payload: dict[str, Any]) -> str:
+    explicit_currency = str(capture_payload.get("currency") or capture_payload.get("currency_code") or "").strip()
+    if explicit_currency:
+        return explicit_currency.upper()[:12]
+    if capture_payload.get("amount_total") is not None:
+        return str(capture_payload.get("currency", "usd")).upper()[:12]
+    purchase_units = capture_payload.get("purchase_units", [])
+    if purchase_units:
+        payments = purchase_units[0].get("payments", {})
+        captures = payments.get("captures", [])
+        if captures:
+            amount = captures[0].get("amount", {})
+            if amount.get("currency_code"):
+                return str(amount["currency_code"]).upper()[:12]
+    return "USD"
+
+
 def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[str, Any]) -> None:
     email = customer_email_from_payload(capture_payload)
     status = str(capture_payload.get("payment_status") or capture_payload.get("status", "CAPTURED")).upper()
+    provider = payment_provider_from_payload(order_id, capture_payload)
+    currency = currency_from_payload(capture_payload)
     with sqlite3.connect(DB_PATH) as conn:
         conn.execute(
             """
             insert or ignore into sales (
                 paypal_order_id, product_slug, product_title, customer_email,
-                amount_usd, status, captured_at, raw_payload
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                amount_usd, currency, provider, status, captured_at, raw_payload
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 order_id,
@@ -526,12 +563,14 @@ def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[st
                 product["title"],
                 email,
                 float(product["price_usd"]),
+                currency,
+                provider,
                 status,
                 now_utc(),
                 json.dumps(capture_payload, ensure_ascii=False),
             ),
         )
-    log_event("capture", "payment", order_id, {"product_slug": product["slug"]})
+    log_event("capture", "payment", order_id, {"product_slug": product["slug"], "provider": provider, "currency": currency})
 
 
 def confirm_manual_payment(
@@ -540,10 +579,12 @@ def confirm_manual_payment(
     customer_email: str,
     config: PayPalConfig,
     provider: str = "manual",
+    currency: str = "USD",
 ) -> tuple[str, str, bool]:
     payload = {
         "status": "MANUAL_CONFIRMED",
         "provider": provider,
+        "currency": currency,
         "payer": {"email_address": customer_email},
         "verified_by": "admin",
     }
@@ -1488,6 +1529,10 @@ def main() -> None:
             st.subheader("Productos mas vendidos")
             st.dataframe(best, width="stretch", hide_index=True)
             st.metric("Clientes registrados", str(df["customer_email"].dropna().replace("", pd.NA).dropna().nunique()))
+            provider_mix = df.groupby(["provider", "currency"])["amount_usd"].agg(["count", "sum"]).reset_index()
+            provider_mix = provider_mix.sort_values(["sum", "count"], ascending=False)
+            st.subheader("Ingresos por metodo y moneda")
+            st.dataframe(provider_mix, width="stretch", hide_index=True)
         st.subheader("Conversion por landing")
         st.dataframe(product_performance_frame(), width="stretch", hide_index=True)
         st.metric("Pagos pendientes", str(len(pending_df)))
@@ -1685,6 +1730,7 @@ def main() -> None:
                         ["PayPal manual", "Bitcoin manual"],
                         key="manual_payment_provider",
                     )
+                    manual_currency = "BTC" if manual_provider == "Bitcoin manual" else "USD"
                     manual_email = st.text_input("Email del comprador", key="manual_payment_email")
                     manual_order_id = st.text_input(
                         "ID de transaccion verificada",
@@ -1706,6 +1752,7 @@ def main() -> None:
                                     manual_email,
                                     paypal,
                                     manual_provider.lower().replace(" ", "_"),
+                                    manual_currency,
                                 )
                                 st.success("Pago manual registrado y entrega generada.")
                                 st.code(download_url, language="text")
