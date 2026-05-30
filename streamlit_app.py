@@ -241,6 +241,15 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            create table if not exists app_settings (
+                key text primary key,
+                value text not null,
+                updated_at text not null
+            )
+            """
+        )
 
 
 def now_utc() -> str:
@@ -256,6 +265,42 @@ def log_event(action: str, entity: str, entity_id: str | None = None, metadata: 
             """,
             (action, entity, entity_id, json.dumps(metadata or {}, ensure_ascii=False), now_utc()),
         )
+
+
+def setting_value(key: str, default: str = "") -> str:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        row = conn.execute("select value from app_settings where key = ?", (key,)).fetchone()
+    if not row:
+        return default
+    return str(row[0])
+
+
+def save_setting(key: str, value: str) -> None:
+    init_db()
+    with sqlite3.connect(DB_PATH) as conn:
+        conn.execute(
+            """
+            insert into app_settings (key, value, updated_at)
+            values (?, ?, ?)
+            on conflict(key) do update set
+                value = excluded.value,
+                updated_at = excluded.updated_at
+            """,
+            (key, value.strip(), now_utc()),
+        )
+    log_event("save", "app_setting", key, {"value_length": len(value.strip())})
+
+
+def wallet_public_address() -> str:
+    return setting_value("owner_btc_public_address", secret("OWNER_BTC_PUBLIC_ADDRESS", "")).strip()
+
+
+def commercial_guarantee() -> str:
+    return setting_value(
+        "commercial_guarantee",
+        "Si el archivo no se puede descargar, se repone el link o se devuelve el pago segun revision.",
+    ).strip()
 
 
 def save_product(product: dict[str, Any], status: str = "draft") -> None:
@@ -421,10 +466,16 @@ def record_sale(order_id: str, product: dict[str, Any], capture_payload: dict[st
     log_event("capture", "payment", order_id, {"product_slug": product["slug"]})
 
 
-def confirm_manual_payment(order_id: str, product: dict[str, Any], customer_email: str, config: PayPalConfig) -> tuple[str, str, bool]:
+def confirm_manual_payment(
+    order_id: str,
+    product: dict[str, Any],
+    customer_email: str,
+    config: PayPalConfig,
+    provider: str = "manual",
+) -> tuple[str, str, bool]:
     payload = {
         "status": "MANUAL_CONFIRMED",
-        "provider": "paypal_manual",
+        "provider": provider,
         "payer": {"email_address": customer_email},
         "verified_by": "admin",
     }
@@ -517,7 +568,7 @@ def record_download_token(token: str) -> None:
 
 
 def receipt_text(order_id: str, product: dict[str, Any]) -> str:
-    payment_label = "Sesion Stripe" if order_id.startswith("stripe_") else "Orden PayPal"
+    payment_label = "Sesion Stripe" if order_id.startswith("stripe_") else "Pago verificado"
     return "\n".join(
         [
             APP_NAME,
@@ -843,7 +894,7 @@ def render_landing_checkout(
     st.write("- La entrega se hace con un link unico despues de confirmar el pago.")
     st.write("- El link dura 48 horas o 3 descargas.")
     st.write("**Garantia comercial**")
-    st.write("Si el archivo no se puede descargar, se repone el link o se devuelve el pago segun revision.")
+    st.write(commercial_guarantee())
     st.divider()
     st.metric("Precio", f"${float(product_dict['price_usd']):.2f} USD")
 
@@ -888,6 +939,16 @@ def render_landing_checkout(
         st.caption(
             "Pago manual no confirma automaticamente la orden ni libera descarga. "
             "El dueno debe verificarlo en PayPal y generar entrega desde Admin."
+        )
+
+    btc_address = wallet_public_address()
+    if btc_address:
+        st.divider()
+        st.write("**Pago manual en Bitcoin**")
+        st.code(btc_address, language="text")
+        st.caption(
+            "Opcion preparada para pagos BTC manuales. No libera descargas automaticamente; "
+            "el dueno debe verificar la transaccion antes de generar entrega."
         )
 
     st.info("Despues del retorno de Stripe o PayPal, la app verifica el pago y habilita la descarga del PDF.")
@@ -1017,7 +1078,7 @@ def main() -> None:
     paypal = paypal_config()
     stripe = stripe_config()
     public_paypal_handle = paypal_public_handle()
-    btc_address = secret("OWNER_BTC_PUBLIC_ADDRESS", "")
+    btc_address = wallet_public_address()
     fallback_product = default_product_dict()
 
     st.title(APP_NAME)
@@ -1115,7 +1176,7 @@ def main() -> None:
         st.write("- ¿Como se entrega? Despues del pago se genera un link unico de descarga.")
         st.write("- ¿Cuanto dura el acceso? 48 horas o 3 descargas por link.")
         st.write("**Garantia comercial**")
-        st.write("Si el archivo no se puede descargar, se repone el link o se devuelve el pago segun revision.")
+        st.write(commercial_guarantee())
         st.divider()
         st.metric("Precio", f"${product.price_usd:.2f} USD")
 
@@ -1269,6 +1330,23 @@ def main() -> None:
         st.write("PayPal API:", "configurado" if paypal.is_configured else "pendiente")
         st.write("PayPal publico:", f"@{public_paypal_handle}" if public_paypal_handle else "pendiente")
         st.write("Bitcoin:", "direccion publica configurada" if btc_address else "pendiente")
+        with st.expander("Configuracion publica"):
+            updated_btc_address = st.text_input(
+                "Direccion publica BTC",
+                value=btc_address,
+                key="admin_btc_public_address",
+                help="Solo direccion publica. Nunca ingreses private keys, seed phrases ni passwords.",
+            )
+            updated_guarantee = st.text_area(
+                "Garantia comercial",
+                value=commercial_guarantee(),
+                key="admin_commercial_guarantee",
+            )
+            if st.button("Guardar configuracion publica", width="stretch"):
+                save_setting("owner_btc_public_address", updated_btc_address)
+                save_setting("commercial_guarantee", updated_guarantee)
+                st.success("Configuracion publica actualizada.")
+                st.rerun()
         product_df = products_frame()
         st.write("Productos guardados")
         st.dataframe(product_df, width="stretch", hide_index=True)
@@ -1291,18 +1369,24 @@ def main() -> None:
                     delete_product(selected_slug)
                     st.warning("Producto eliminado.")
                 with st.expander("Registrar pago manual verificado"):
+                    manual_provider = st.selectbox(
+                        "Metodo verificado",
+                        ["PayPal manual", "Bitcoin manual"],
+                        key="manual_payment_provider",
+                    )
                     manual_email = st.text_input("Email del comprador", key="manual_payment_email")
                     manual_order_id = st.text_input(
-                        "ID de transaccion PayPal verificada",
+                        "ID de transaccion verificada",
                         key="manual_payment_order_id",
-                        placeholder="PAYPAL-TXN-...",
+                        placeholder="PAYPAL-TXN-... o BTC-TXID-...",
                     )
                     st.caption(
-                        "Usa esto solo despues de confirmar el pago en PayPal. Genera link unico, recibo y email opcional."
+                        "Usa esto solo despues de confirmar el pago en PayPal o en la red Bitcoin. "
+                        "Genera link unico, recibo y email opcional."
                     )
                     if st.button("Confirmar pago manual y generar entrega", type="primary", width="stretch"):
                         if not manual_email or not manual_order_id:
-                            st.error("Ingresa email del comprador e ID de transaccion PayPal.")
+                            st.error("Ingresa email del comprador e ID de transaccion verificada.")
                         else:
                             try:
                                 download_url, expires_at, email_sent = confirm_manual_payment(
@@ -1310,6 +1394,7 @@ def main() -> None:
                                     selected_product,
                                     manual_email,
                                     paypal,
+                                    manual_provider.lower().replace(" ", "_"),
                                 )
                                 st.success("Pago manual registrado y entrega generada.")
                                 st.code(download_url, language="text")

@@ -78,6 +78,7 @@ EMAIL_FROM = "AI Digital Product Money Machine <onboarding@resend.dev>"
 Use Stripe test mode first. For PayPal, use `sandbox` first and switch `PAYPAL_MODE` to `live` only after a successful test purchase.
 
 `APP_BASE_URL` is only needed when you want to force a custom return URL. Otherwise, the app uses Streamlit's runtime URL as the Stripe and PayPal return/cancel base.
+`OWNER_BTC_PUBLIC_ADDRESS` can be set here as a default or later from the private Admin panel.
 
 After the app is deployed, open the **Setup** tab. It shows the same GitHub file URL,
 the secrets template, the detected return URL, and **Probar conexion Stripe** /
@@ -96,6 +97,8 @@ The deployed Streamlit app also includes:
 - Wallet BTC tab with public address, accumulated revenue, BTC estimate, and manual conversion guidance.
 - Admin tab for product price updates, delete actions, pending orders, and audit logs.
 - Manual verified payment registration from Admin for PayPal public-handle payments.
+- Manual verified Bitcoin payment preparation through the configured public BTC address.
+- Editable public BTC address and commercial guarantee from Admin.
 - Marketing tab with social/email/WhatsApp copy, A/B headline/CTA variants, and a simple content calendar.
 - Optional PayPal public handle fallback (`PAYPAL_PUBLIC_HANDLE`) for manual payments while API credentials are pending. Manual payments do not unlock automatic delivery.
 
@@ -129,6 +132,12 @@ The app uses PayPal Orders API flow:
 4. Record the sale locally and unlock the PDF download.
 
 Official PayPal Checkout guidance describes this backend flow: create an order, then capture the order after buyer approval. PayPal also recommends keeping `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` as environment variables/secrets.
+
+## Bitcoin payment preparation
+
+The app can show a public BTC address on the buyer landing page. BTC payments are manual:
+the app does not monitor the chain, does not move funds, and does not unlock products
+until the owner verifies the transaction and records it in Admin.
 
 ## Security
 
